@@ -14,5 +14,6 @@ void Base64_Encode(uint8_t *input, uint16_t input_len, char *output);
 void SD_Init(void);
 void SD_SendFile(char *filename, uint16_t sector);
 void SD_SaveFiles(void);
+void SD_ListFiles_KISS(void);
 
 #endif /* SD_UTILS_H */

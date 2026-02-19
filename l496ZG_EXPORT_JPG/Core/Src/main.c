@@ -58,6 +58,8 @@ uint8_t rx_buffer[MAX_FRAME_SIZE];
 uint8_t decoded_buffer[MAX_FRAME_SIZE];
 uint16_t rx_index = 0;
 volatile uint8_t flag_send_file = 0;
+volatile uint8_t flag_list_files = 0;
+char file_to_send[13] = "01261311.jpg";
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -103,15 +105,17 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
               break;
             
             case 0x00:
-              if (decoded_buffer[1] == 0x13) {   
-                 HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin); // Toggle Red LED    	  
-                //  SD_SendFile("01261311.jpg",0x0010);
-                 printf("VR should be sent data to save in SD card\r\n");
-				 printf("Data: ");
-				 for(int i=0; i<decoded_len; i++) {
-					 printf("%02X ", decoded_buffer[i]);
-				 }
-				 printf("\r\n");
+                  if (decoded_buffer[1] == 0x13) {
+                     // Extract filename if present
+                     if (decoded_len >= 14) { // 2 bytes cmd + 12 bytes filename
+                        memcpy(file_to_send, &decoded_buffer[2], 12);
+                        file_to_send[12] = 0;
+                     }
+                     HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin); // Toggle Red LED    	  
+                     flag_send_file = 1;
+                  }
+              else if (decoded_buffer[1] == 0x10) {
+                 flag_list_files = 1;
               }
               break;
             
@@ -182,6 +186,17 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+      if (flag_send_file) {
+          flag_send_file = 0;
+          SD_SendFile(file_to_send, 0xFFFF);
+      }
+      if (flag_list_files) {
+          flag_list_files = 0;
+          SD_ListFiles_KISS();
+      }
+      // SD_ListFiles_KISS();
+      // HAL_Delay(1000);
+
       SD_SaveFiles();
     /* USER CODE END WHILE */
 

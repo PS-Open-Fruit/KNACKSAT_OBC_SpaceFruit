@@ -6,6 +6,7 @@ CRC.IPParameters=OutputDataInversionMode,InputDataInversionMode
 CRC.InputDataInversionMode=CRC_INPUTDATA_INVERSION_BYTE
 CRC.OutputDataInversionMode=CRC_OUTPUTDATA_INVERSION_ENABLE
 File.Version=6
+GPIO.groupedBy=Group By Peripherals
 KeepUserPlacement=false
 LPUART1.BaudRate=209700
 LPUART1.IPParameters=WordLength,BaudRate

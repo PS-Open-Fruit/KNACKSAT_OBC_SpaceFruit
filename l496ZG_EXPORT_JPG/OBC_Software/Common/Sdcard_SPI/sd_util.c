@@ -371,3 +371,60 @@ void SD_SendFile(char *filename, uint16_t sector) {
         }
     }
 }
+
+void SD_ListFiles_KISS(void) {
+    FRESULT res;
+    DIR dir;
+    FILINFO fno;
+    static uint8_t packet_buffer[2048]; // Static max 2KB payload
+    uint16_t idx = 0;
+    static uint8_t encoded_buffer[4096]; // Static buffer
+
+    // 1. KISS Command 0x00
+    packet_buffer[idx++] = 0x00;
+    // 2. SubCMD (List Response) 0x11
+    packet_buffer[idx++] = 0x11;
+
+    res = f_opendir(&dir, "/");
+    if (res == FR_OK) {
+        // Iterate
+        for (;;) {
+            res = f_readdir(&dir, &fno);
+            if (res != FR_OK || fno.fname[0] == 0) break; // Break on error or end of dir
+
+            // Skip directories 
+            if (fno.fattrib & AM_DIR) continue; 
+            
+            // Check buffer overflow (Leave room for CRC 4 bytes)
+            if (idx + 16 + 4 > sizeof(packet_buffer)) break; 
+
+            // Copy filename safely (max 12 chars)
+            // Pad with 0 first
+            memset(&packet_buffer[idx], 0, 12);
+            strncpy((char*)&packet_buffer[idx], fno.fname, 12);
+            idx += 12;
+
+            // Size [4 bytes]
+            uint32_t fsize = fno.fsize;
+            memcpy(&packet_buffer[idx], &fsize, 4);
+            idx += 4;
+        }
+        f_closedir(&dir);
+    }
+    
+    // Calculate CRC
+    // Ensure CRC handle initialized
+    OBC_Packet_Init(&hcrc);
+    __HAL_CRC_DR_RESET(&hcrc);
+
+    uint32_t crc = OBC_Calculate_CRC(packet_buffer, idx);
+    memcpy(&packet_buffer[idx], &crc, 4);
+    idx += 4;
+
+    // Encode
+    uint16_t encoded_len = SLIP_Encode(packet_buffer, idx, encoded_buffer);
+
+    // Send
+    HAL_UART_Transmit(&hlpuart1, encoded_buffer, encoded_len, 2000);
+    HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14); // Toggle activity LED
+}
