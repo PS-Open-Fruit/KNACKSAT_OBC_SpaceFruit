@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "fatfs.h"
 #include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -81,7 +82,7 @@ UART_HandleTypeDef huart3;
 osThreadId_t MainTaskHandle;
 const osThreadAttr_t MainTask_attributes = {
   .name = "MainTask",
-  .stack_size = 1024 * 4,
+  .stack_size = 2048 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for USBTask */
@@ -227,6 +228,7 @@ int main(void)
   MX_I2C4_Init();
   MX_CRC_Init();
   MX_IWDG_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
   // HAL_CAN_Start(&hcan2);
 
@@ -490,7 +492,7 @@ static void MX_IWDG_Init(void)
 
   /* USER CODE END IWDG_Init 1 */
   hiwdg.Instance = IWDG;
-  hiwdg.Init.Prescaler = IWDG_PRESCALER_128;
+  hiwdg.Init.Prescaler = IWDG_PRESCALER_16;
   hiwdg.Init.Window = 4095;
   hiwdg.Init.Reload = 120;
   if (HAL_IWDG_Init(&hiwdg) != HAL_OK)
@@ -936,8 +938,9 @@ void mainTask(void *argument)
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 5 */
+  // osThreadSuspend(sensorQueryHandle);
+  osThreadTerminate(sensorQueryHandle);
   printf("\ecStart of mainTask\r\n");
-  osThreadSuspend(sensorQueryHandle);
   gpio_t cs_flash = {
       .GPIOx = NOR_CS_GPIO_Port,
       .Pin = NOR_CS_Pin};
@@ -959,10 +962,16 @@ void mainTask(void *argument)
 
   printf("Program Start\r\n");
   
+  if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST)) {
+    printf("Reset by IWDG\r\n");
+  }
+  osDelay(100);
   fs_init(&flash);
   lfs_file_t file;
   // mount the filesystem
   int err = lfs_mount(&lfs, &cfg);
+  osDelay(100);
+
   // reformat if we can't mount the filesystem
   // this should only happen on the first boot
   if (err)
@@ -971,12 +980,15 @@ void mainTask(void *argument)
     lfs_format(&lfs, &cfg);
     lfs_mount(&lfs, &cfg);
   }
+  osDelay(100);
 
 
   // read current count
   uint32_t boot_count = 0;
   lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDWR | LFS_O_CREAT);
   lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
+  osDelay(100);
+
   // update boot count
   boot_count += 1;
   lfs_file_rewind(&lfs, &file);
@@ -992,28 +1004,114 @@ void mainTask(void *argument)
   printf("boot_count: %ld\r\n", boot_count);
   // print the boot count
 
-  if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST)) {
-    printf("Reset by IWDG\r\n");
-  }
 
-  osThreadResume(sensorQueryHandle);
+  rv3028c7_t rtc = {
+     .rv3028c7_i2c_hal.hi2c = &hi2c4,
+     .address = 0x52,
+ };
+ rv3028c7_init(&rtc);
+
   obc_sensor_data_t _obc_sensors;
   eps_sensor_data_t _eps_sensors;
 
   uint8_t sensors_data_ready = 0;
 
-   rv3028c7_t rtc = {
-      .rv3028c7_i2c_hal.hi2c = &hi2c4,
-      .address = 0x52,
-  };
-  rv3028c7_init(&rtc);
   date_time_t datetime;
+
+
+      printf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
+
+    osDelay(1000); //a short delay is important to let the SD card settle
+
+    //some variables for FatFs
+    FATFS FatFs; 	//Fatfs handle
+    FIL fil; 		//File handle
+    FRESULT fres; //Result after operations
+
+    //Open the file system
+    fres = f_mount(&FatFs, "", 1); //1=mount now
+    if (fres != FR_OK) {
+  	  printf("f_mount error (%i)\r\n", fres);
+  	while(1);
+    }
+
+    //Let's get some statistics from the SD card
+    DWORD free_clusters, free_sectors, total_sectors;
+
+    FATFS* getFreeFs;
+
+    fres = f_getfree("", &free_clusters, &getFreeFs);
+    if (fres != FR_OK) {
+  	  printf("f_getfree error (%i)\r\n", fres);
+  	  while(1);
+    }
+
+    //Formula comes from ChaN's documentation
+    total_sectors = (getFreeFs->n_fatent - 2) * getFreeFs->csize;
+    free_sectors = free_clusters * getFreeFs->csize;
+
+    printf("SD card stats:\r\n%10lu KiB total drive space.\r\n%10lu KiB available.\r\n", total_sectors / 2, free_sectors / 2);
+
+    //Now let's try to open file "test.txt"
+    fres = f_open(&fil, "test.txt", FA_READ);
+    if (fres != FR_OK) {
+  	  printf("f_open error (%i)\r\n", fres);
+  	while(1);
+    }
+      printf("I was able to open 'test.txt' for reading!\r\n");
+
+    //Read 30 bytes from "test.txt" on the SD card
+    BYTE readBuf[30];
+
+    //We can either use f_read OR f_gets to get data out of files
+    //f_gets is a wrapper on f_read that does some string formatting for us
+    TCHAR* rres = f_gets((TCHAR*)readBuf, 30, &fil);
+    if(rres != 0) {
+  	  printf("Read string from 'test.txt' contents: %s\r\n", readBuf);
+    } else {
+  	  printf("f_gets error (%i)\r\n", fres);
+    }
+
+    //Be a tidy kiwi - don't forget to close your file!
+    f_close(&fil);
+
+    //Now let's try and write a file "write.txt"
+    fres = f_open(&fil, "write.txt", FA_WRITE | FA_OPEN_ALWAYS | FA_CREATE_ALWAYS);
+    if(fres == FR_OK) {
+  	  printf("I was able to open 'write.txt' for writing\r\n");
+    } else {
+  	  printf("f_open error (%i)\r\n", fres);
+    }
+
+    //Copy in a string
+    strncpy((char*)readBuf, "a new file is made!", 19);
+    UINT bytesWrote;
+    fres = f_write(&fil, readBuf, 19, &bytesWrote);
+    if(fres == FR_OK) {
+  	printf("Wrote %i bytes to 'write.txt'!\r\n", bytesWrote);
+    } else {
+  	printf("f_write error (%i)\r\n", fres);
+    }
+
+    //Be a tidy kiwi - don't forget to close your file!
+    f_close(&fil);
+
+    //We're done, so de-mount the drive
+    f_mount(NULL, "", 0);
+    osDelay(1000);
+
+  // osThreadResume(sensorQueryHandle);
+
+
 
   /* Infinite loop */
   for(;;)
   {
     sensors_data_ready = 0;
     HAL_StatusTypeDef ret = rv3028c7_read_time(&rtc, &datetime);
+    if (ret != HAL_OK){
+      printf("get time error\r\n");
+    }
     osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
     if (os_ret != osOK){
       printf("Aquire OBC Sensor error\r\n");

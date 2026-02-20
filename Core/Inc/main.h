@@ -46,6 +46,8 @@ typedef struct usb_data{
 
 extern osMessageQueueId_t cdcDataQueueHandle;
 
+#define SD_SPI_HANDLE hspi1
+
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
