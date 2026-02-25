@@ -411,7 +411,6 @@ void OBC_Process_Loop(void) {
         // Validate CRC (GS -> OBC)
         uint8_t gs_crc_ok = 0;
         if (dec_len >= 5) {
-            //  [KISS_CMD] + [CRC:4] = 5 bytes (Empty payload)
              uint32_t rx_crc;
              memcpy(&rx_crc, &decoded_gs[dec_len-4], 4);
              
@@ -424,38 +423,66 @@ void OBC_Process_Loop(void) {
         }
 
         if (gs_crc_ok) {
-             // Index 0 is KISS CMD (should be 0x00), Index 1 is APP CMD
              uint8_t kiss_cmd = decoded_gs[0];
              uint8_t cmd_id = decoded_gs[1];
              
              if (kiss_cmd == 0x00) {
-                 if (cmd_id == 0x12) { 
-                     OBC_Log("[OBC] GS CMD: Capture!");
-                     if (VR_IsOnline()) VR_SendCmd(VR_CMD_CAPTURE_RES);
-                     else OBC_Log("[OBC] VR Offline! Cannot Capture.");
-                 }
-                 else if (cmd_id == 0x10) { 
+                 // Ground-driven protocol: forward most commands to VR
+                 if (cmd_id == 0x10) { 
                      OBC_Log("[OBC] GS CMD: Ping!");
                      if (VR_IsOnline()) VR_RequestGSPing();
                      else OBC_Log("[OBC] VR Offline! Pong failed.");
                  }
+                 else if (cmd_id == 0x11) {
+                     OBC_Log("[OBC] GS CMD: Status Req!");
+                     if (VR_IsOnline()) {
+                         uint8_t tx_frame[32];
+                         uint16_t len = SLIP_Encode(decoded_gs, dec_len, tx_frame);
+                         CDC_Transmit_FS(tx_frame, len);
+                     }
+                     else OBC_Log("[OBC] VR Offline! Cannot get status.");
+                 }
+                 else if (cmd_id == 0x12) { 
+                     OBC_Log("[OBC] GS CMD: Capture!");
+                     if (VR_IsOnline()) {
+                         // Forward CAPTURE to VR
+                         uint8_t tx_frame[32];
+                         uint16_t len = SLIP_Encode(decoded_gs, dec_len, tx_frame);
+                         CDC_Transmit_FS(tx_frame, len);
+                     }
+                     else OBC_Log("[OBC] VR Offline! Cannot Capture.");
+                 }
+                 else if (cmd_id == 0x15) { 
+                     OBC_Log("[OBC] GS CMD: Request File!");
+                     if (VR_IsOnline()) {
+                         // Forward REQUEST to VR
+                         uint8_t tx_frame[64];
+                         uint16_t len = SLIP_Encode(decoded_gs, dec_len, tx_frame);
+                         CDC_Transmit_FS(tx_frame, len);
+                     }
+                     else OBC_Log("[OBC] VR Offline! Cannot Request.");
+                 }
+                 else if (cmd_id == 0x19) {
+                     // REPORT - forward to VR (no logging to avoid spam)
+                     if (VR_IsOnline()) {
+                         uint8_t tx_frame[256];
+                         uint16_t len = SLIP_Encode(decoded_gs, dec_len, tx_frame);
+                         CDC_Transmit_FS(tx_frame, len);
+                     }
+                 }
+                 else if (cmd_id == 0x1A) {
+                     OBC_Log("[OBC] GS CMD: Final!");
+                     if (VR_IsOnline()) {
+                         // Forward FINAL to VR
+                         uint8_t tx_frame[32];
+                         uint16_t len = SLIP_Encode(decoded_gs, dec_len, tx_frame);
+                         CDC_Transmit_FS(tx_frame, len);
+                     }
+                 }
                  else if (cmd_id == 0x20) { 
                      OBC_Log("[OBC] GS CMD: Status Req!");
-                     if (VR_IsOnline()) VR_SendCmd(VR_CMD_STATUS_RES); 
+                     if (VR_IsOnline()) VR_SendCmd(0x11); 
                      else OBC_Log("[OBC] VR Offline! No Status.");
-                 }
-                 else if (cmd_id == 0x13) {
-                     // Get Chunk ID from payload (2 bytes)
-                     // Packet: [CMD:1] [ID_L] [ID_H]
-                     if (dec_len >= 4) { // CMD + 2 + CRC (implied valid if we are here, payload is dec_len - 4)
-                         uint16_t payload_len = dec_len - 4; // Excluding CRC
-                         // payload: [KISS] [APP] [DATA...]
-                         if (payload_len >= 4) { // Needs [KISS] [APP] [ID_L] [ID_H]
-                             uint16_t req_id = decoded_gs[2] | (decoded_gs[3] << 8);
-                             // NO LOGGING to avoid flooding the bridge
-                             if (VR_IsOnline()) VR_SendChunkReq(req_id);
-                         }
-                     }
                  }
              }
         }
@@ -507,13 +534,18 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
         
         // 3. End of Frame Check
         if (gs_isr_idx > 1 && uart_rx_char == FEND) {
-            if (is_gs_frame_ready == 0) {
-                 // Move to App Buffer
-                 memcpy(gs_app_buffer, gs_isr_buffer, gs_isr_idx);
-                 gs_app_len = gs_isr_idx;
-                 is_gs_frame_ready = 1;
+            if (gs_isr_idx == 2) {
+                // It's just FEND FEND. Keep the last FEND as the start of the next frame.
+                gs_isr_idx = 1;
+            } else {
+                if (is_gs_frame_ready == 0) {
+                     // Move to App Buffer
+                     memcpy(gs_app_buffer, gs_isr_buffer, gs_isr_idx);
+                     gs_app_len = gs_isr_idx;
+                     is_gs_frame_ready = 1;
+                }
+                gs_isr_idx = 0;
             }
-            gs_isr_idx = 0;
         }
 
         // Re-arm interrupt
@@ -539,21 +571,26 @@ void OBC_On_Receive(uint8_t* Buf, uint32_t *Len) {
         
         // 3. End of Frame Check
         if (isr_rx_idx > 1 && byte == FEND) {
-            // Frame is complete. Try to move Buffer A -> Buffer B
-            
-            if (is_frame_ready == 0) {
-                 // Buffer B is free. Perform the Copy.
-                 memcpy(app_process_buffer, isr_rx_buffer, isr_rx_idx);
-                 app_process_len = isr_rx_idx;
-                 
-                 // Signal Main Loop
-                 is_frame_ready = 1;
+            if (isr_rx_idx == 2) {
+                // It's just FEND FEND. Keep the last FEND as the start of the next frame.
+                isr_rx_idx = 1;
+            } else {
+                // Frame is complete. Try to move Buffer A -> Buffer B
+                
+                if (is_frame_ready == 0) {
+                     // Buffer B is free. Perform the Copy.
+                     memcpy(app_process_buffer, isr_rx_buffer, isr_rx_idx);
+                     app_process_len = isr_rx_idx;
+                     
+                     // Signal Main Loop
+                     is_frame_ready = 1;
+                }
+                // else: Buffer B is still busy being processed by Main Loop.
+                // We drop this frame to prevent data corruption.
+                
+                // Reset Buffer A Index for next frame
+                isr_rx_idx = 0;
             }
-            // else: Buffer B is still busy being processed by Main Loop.
-            // We drop this frame to prevent data corruption.
-            
-            // Reset Buffer A Index for next frame
-            isr_rx_idx = 0;
         }
     }
 }
