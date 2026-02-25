@@ -7,6 +7,8 @@ import os
 import sys
 import time
 import struct
+import json
+import shutil
 import serial
 import threading
 from http.server import SimpleHTTPRequestHandler
@@ -59,9 +61,12 @@ class WebDashboard:
         
     def _run_server(self):
         dashboard = self
+
+        class ReusableTCPServer(TCPServer):
+            allow_reuse_address = True
         
         class Handler(SimpleHTTPRequestHandler):
-            def __init__(req_self, *args, **kwargs):
+            def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=dashboard.web_dir, **kwargs)
                 
             def log_message(self, format, *args):
@@ -73,9 +78,49 @@ class WebDashboard:
                     self.send_response(200)
                     self.end_headers()
                     self.wfile.write(b'OK')
+                    return
 
-        with TCPServer(("", self.port), Handler) as httpd:
-            httpd.serve_forever()
+                if self.path == '/api/command':
+                    content_len = int(self.headers.get('Content-Length', '0'))
+                    raw_body = self.rfile.read(content_len) if content_len > 0 else b''
+
+                    try:
+                        body = json.loads(raw_body.decode('utf-8')) if raw_body else {}
+                    except Exception:
+                        body = {}
+
+                    command = str(body.get('command', '')).strip().lower()
+
+                    if command == 'capture':
+                        dashboard.gs.send_capture()
+                    elif command == 'status':
+                        dashboard.gs.send_kiss_command(CMD_STATUS)
+                    elif command == 'ping':
+                        dashboard.gs.send_kiss_command(CMD_PING)
+
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(b'{"ok":true}')
+                    return
+
+                self.send_response(404)
+                self.end_headers()
+
+            def do_GET(self):
+                if self.path.startswith('/api/state'):
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(dashboard.gs.dash_state).encode('utf-8'))
+                    return
+                super().do_GET()
+
+        try:
+            with ReusableTCPServer(("", self.port), Handler) as httpd:
+                httpd.serve_forever()
+        except Exception as e:
+            print(f"   ❌ Dashboard server error on port {self.port}: {e}")
 
 # ==========================================
 # Ground Station
@@ -105,6 +150,7 @@ class GroundStation:
             },
             "logs": []
         }
+        self.update_json_state()
         
         # Transfer state
         self.current_file_info = None
@@ -181,11 +227,12 @@ class GroundStation:
             print(f"❌ Connection Failed: {e}")
             self.dash_state["connection"] = "ERROR"
             self.update_json_state()
-            return
+            print("   ℹ️ Dashboard remains available; serial commands will fail until link is restored.")
 
         # Start background listener thread
-        rx_thread = threading.Thread(target=self.listen_loop, daemon=True)
-        rx_thread.start()
+        if self.ser and self.ser.is_open:
+            rx_thread = threading.Thread(target=self.listen_loop, daemon=True)
+            rx_thread.start()
 
         # Start main CLI loop
         self.cli_loop()
@@ -557,7 +604,17 @@ class GroundStation:
         self.send_final(self.run_id)
         
         # Decode SSDV if available
-        self.decode_ssdv(filepath)
+        decoded_image = self.decode_ssdv(filepath)
+        if decoded_image:
+            self.update_live_image(decoded_image)
+
+    def update_live_image(self, image_path):
+        """Update dashboard live image file."""
+        try:
+            live_path = os.path.join(self.dashboard.web_dir, 'live.jpg')
+            shutil.copyfile(image_path, live_path)
+        except Exception as e:
+            print(f"   ⚠️ Live image update failed: {e}")
 
     def decode_ssdv(self, bin_file):
         """Decode SSDV to JPEG."""
@@ -573,10 +630,12 @@ class GroundStation:
             # Use shell=True if on windows and command not found otherwise, but let's stick to default
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             print(f"   🎞️ SSDV Decoded: {jpg_file}")
+            return jpg_file
         except FileNotFoundError:
              print("   ⚠️ SSDV decode failed: 'ssdv' executable not found.")
         except Exception as e:
             print(f"   ⚠️ SSDV decode failed: {e}")
+        return None
 
     def handle_vr_status(self, payload):
         """Handle VR status report."""
@@ -610,10 +669,13 @@ class GroundStation:
 
     def update_json_state(self):
         """Writes current state to JSON for web UI."""
-        import json
         self.dash_state["last_seen"] = time.time()
         try:
-            with open(os.path.join(self.dashboard.web_dir, 'state.json'), 'w') as f:
+            state_path = os.path.join(self.dashboard.web_dir, 'state.json')
+            status_path = os.path.join(self.dashboard.web_dir, 'status.json')
+            with open(state_path, 'w', encoding='utf-8') as f:
+                json.dump(self.dash_state, f)
+            with open(status_path, 'w', encoding='utf-8') as f:
                 json.dump(self.dash_state, f)
         except:
             pass
