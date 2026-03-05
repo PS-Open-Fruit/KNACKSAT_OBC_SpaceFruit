@@ -17,7 +17,7 @@ The communication is structured into three contextual layers to handle data rout
 | FEND | Command | SeqNum | PayloadID | PID | DataLen | Data   | CRC32 | FEND |
 | :--- | :------ | :----- | :-------- | :-- | :------ | :----- | :---- | :--- |
 | 1B   | 1B      | 1B     | 1B        | 1B  | 2B      | < 64kB | 4B    | 1B   |
-| 0xC0 | KISS    | Window | Dest/Src  | Type| Size    | Payload| Check | 0xC0 |
+| 0xC0 | KISS    | Running number | Subsystem  | Type| Data Size    | Payload| Calculate | 0xC0 |
 
 *Note: The KISS layer escapes any internal `0xC0` (FEND) or `0xDB` (FESC) bytes before transmission.*
 
