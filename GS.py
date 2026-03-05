@@ -1,6 +1,8 @@
 import serial
 import struct
 import time
+import threading
+import queue
 
 # Import your custom KISS protocol class
 from Shared.Python.kiss_protocol import KISSProtocol
@@ -9,14 +11,51 @@ from Shared.Python.kiss_protocol import KISSProtocol
 PORT = 'COM4'  # Change to your virtual or real COM port
 BAUD = 9600
 
-# --- TELEMETRY IDs (PIDs) ---
-PIDs = {
-    0x01: "Solar Cell Voltage",
-    0x02: "Solar Cell Current",
-    0x03: "Battery Voltage",
-    0x04: "Battery Current",
-    0x05: "Battery Temperature"
-}
+# --- SIMULATED REQUESTS (PayloadID, PID, Description) ---
+# Emulating the Excel design flow
+REQUESTS = [
+    (0x00, 0x00, "Request List files (SD)"),
+    (0x00, 0x01, "Request File Info (SD)"),
+    (0x01, 0x01, "Request Capture (VR)"),
+    (0x01, 0x00, "Request Pi Status (VR)")
+]
+
+def colorize_raw_frame(frame: bytes) -> str:
+    """Colors the raw KISS frame hex string for easier reading."""
+    if len(frame) < 12: return frame.hex(' ').upper()
+    parts = [
+        f"\033[90m{frame[0:1].hex().upper()}\033[0m", # FEND
+        f"\033[95m{frame[1:2].hex().upper()}\033[0m", # CMD
+        f"\033[94m{frame[2:3].hex().upper()}\033[0m", # SeqNum
+        f"\033[93m{frame[3:4].hex().upper()}\033[0m", # PayloadID
+        f"\033[96m{frame[4:5].hex().upper()}\033[0m", # PID
+        f"\033[92m{frame[5:7].hex(' ').upper()}\033[0m", # DataLen
+    ]
+    data_len = len(frame) - 12
+    if data_len > 0:
+        parts.append(f"\033[97m{frame[7:7+data_len].hex(' ').upper()}\033[0m") # Data
+    parts.append(f"\033[91m{frame[-5:-1].hex(' ').upper()}\033[0m") # CRC
+    parts.append(f"\033[90m{frame[-1:].hex().upper()}\033[0m") # FEND
+    return " ".join(parts)
+
+command_queue = queue.Queue()
+
+def cli_thread():
+    print("\n\033[1;33m--- Command Line Interface ---\033[0m")
+    print("Commands:")
+    for i, req in enumerate(REQUESTS):
+        print(f"  {i}: {req[2]}")
+    print("\033[3mType the number and press Enter to send.\033[0m")
+    while True:
+        try:
+            choice = input()
+            idx = int(choice.strip())
+            if 0 <= idx < len(REQUESTS):
+                command_queue.put(REQUESTS[idx])
+            else:
+                print("Invalid choice.")
+        except Exception:
+            pass
 
 def build_custom_payload(payload_id: int, pid: int, seq_num: int, data: bytes) -> bytes:
     data_len = len(data)
@@ -43,22 +82,27 @@ def main():
     
     FEND_BYTE = bytes([KISSProtocol.FEND])
     rx_buffer = bytearray()
-    last_request_time = 0
     highest_seq_received = -1
     packets_received_in_window = 0
     
+    threading.Thread(target=cli_thread, daemon=True).start()
+    
     while True:
-        # 1. Master Polling: Ask for data every 5 seconds
-        if time.time() - last_request_time > 5.0:
-            print("\n[GS] Requesting Telemetry from OBC...")
-            custom_payload = build_custom_payload(0x00, 0xFF, 0x00, b'') 
+        # 1. Process CLI Commands
+        try:
+            target_p_id, target_pid, desc = command_queue.get_nowait()
+            print(f"\n[GS] Sending: {desc} (PayloadID: 0x{target_p_id:02X}, PID: 0x{target_pid:02X})")
+            custom_payload = build_custom_payload(target_p_id, target_pid, 0x00, b'') 
             req_frame = KISSProtocol.wrap_frame(custom_payload, command=0x00)
-            print(f"\033[96m  -> TX Raw Frame: {req_frame.hex(' ').upper()}\033[0m")
+            
+            print("  Color Legend: \033[90mFEND\033[0m \033[95mCMD\033[0m \033[94mSEQ\033[0m \033[93mPL_ID\033[0m \033[96mPID\033[0m \033[92mLEN\033[0m \033[97mDATA\033[0m \033[91mCRC\033[0m \033[90mFEND\033[0m")
+            print(f"  -> TX Raw Frame: {colorize_raw_frame(req_frame)}")
             ser.write(req_frame)
             
-            last_request_time = time.time()
             highest_seq_received = -1
             packets_received_in_window = 0
+        except queue.Empty:
+            pass
 
         # 2. Process Incoming Bytes
         byte = ser.read(1)
@@ -68,7 +112,7 @@ def main():
                 if len(rx_buffer) >= 3:
                     unwrapped = KISSProtocol.unwrap_frame(bytes(rx_buffer))
                     if unwrapped:
-                        print(f"\033[92m  <- RX Raw Frame: {rx_buffer.hex(' ').upper()}\033[0m")
+                        print(f"  <- RX Raw Frame: {colorize_raw_frame(rx_buffer)}")
                         cmd, payload_bytes = unwrapped
                         parsed = parse_custom_payload(payload_bytes)
                         
@@ -77,9 +121,7 @@ def main():
                             
                             # Handle Data Frame (Command 0x01)
                             if cmd == 0x01:
-                                value = struct.unpack('>f', data)[0]
-                                sensor_name = PIDs.get(pid, f"Unknown PID 0x{pid:02X}")
-                                print(f"  <- Received: {sensor_name} = {value:.2f} (Seq: {seq})")
+                                print(f"  <- Received Response [PayloadID: 0x{p_id:02X}, PID: 0x{pid:02X}, Seq: {seq}] Data: {data}")
                                 
                                 highest_seq_received = max(highest_seq_received, seq)
                                 packets_received_in_window += 1
@@ -89,7 +131,7 @@ def main():
                                     print(f"[GS] Window complete. Sending ACK for SeqNum {highest_seq_received}")
                                     ack_payload = build_custom_payload(0x00, 0x00, highest_seq_received, b'')
                                     ack_frame = KISSProtocol.wrap_frame(ack_payload, command=0xAC)
-                                    print(f"\033[96m  -> TX Raw Frame: {ack_frame.hex(' ').upper()}\033[0m")
+                                    print(f"  -> TX Raw Frame: {colorize_raw_frame(ack_frame)}")
                                     ser.write(ack_frame)
                                     
                 rx_buffer = bytearray(FEND_BYTE)
