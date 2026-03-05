@@ -108,23 +108,42 @@ def main():
                                 # Emulate sending a response back to GS
                                 seq_counter = (seq_counter + 1) % 256
                                 
-                                # Generate specific dummy data based on the request
-                                dummy_data = b'OK'
+                                # Generate specific dummy binary data based on the Request
+                                dummy_data = b''
                                 if p_id == OBC_SUBSYSTEM:
-                                    if pid == 0x00:
-                                        dummy_data = b'image_01.jpg,telemetry.csv,log.txt'
-                                    elif pid == 0x01:
-                                        dummy_data = b'image_01.jpg|2.4MB|2026-03-05'
-                                    elif pid == 0x02:
-                                        dummy_data = b'\\xFF\\xD8\\xFF\\xE0 (Simulated JPEG Magic Bytes)'
+                                    if pid == 0x00: # List Files
+                                        files = [b"image_01.jpg", b"telemetry.csv", b"log.txt"]
+                                        dummy_data = struct.pack('>B', len(files)) # NumFiles
+                                        for f in files:
+                                            dummy_data += struct.pack('>B', len(f)) + f # Len + Name
+                                            
+                                    elif pid == 0x01: # File Info
+                                        dummy_data = struct.pack('>BII', 
+                                            0x00,          # Status: 0x00 OK
+                                            25165824,      # FileSize: ~24MB
+                                            1772722800     # CreatedTs: epoch
+                                        )
+                                        
+                                    elif pid == 0x02: # File Data (Chunk)
+                                        chunk = b'\\xFF\\xD8\\xFF\\xE0\\x00\\x10JFIF' # 10 byte jpeg header
+                                        dummy_data = struct.pack('>BII', 
+                                            0x00,          # Status: OK
+                                            0,             # Offset: 0
+                                            len(chunk)     # ActualDataLength
+                                        ) + chunk
+
                                 elif p_id == VR_SUBSYSTEM:
-                                    if pid == 0x00:
-                                        dummy_data = b'CPU: 45C | RAM: 60% | CAM: Ready'
-                                    elif pid == 0x01:
-                                        dummy_data = b'Capture Success! Saved as image_02.jpg'
-                                    elif pid == 0x02:
-                                        dummy_data = b'Copying image_02.jpg to SD -> Done.'
-                                
+                                    if pid == 0x00: # Pi Status
+                                        dummy_data = struct.pack('>bBB',
+                                            45,   # CPUTemp (signed)
+                                            60,   # RAMUsage 
+                                            0x01  # CameraStatus: Ready
+                                        )
+                                        
+                                    elif pid == 0x01: # Capture
+                                        filename = b"image_02.jpg"
+                                        dummy_data = struct.pack('>BB', 0x00, len(filename)) + filename
+                                        
                                 # Send response (Command 0x01) echoing the p_id and pid
                                 custom_payload = build_custom_payload(p_id, pid, seq_counter, dummy_data)
                                 tx_frame = KISSProtocol.wrap_frame(custom_payload, command=0x01)

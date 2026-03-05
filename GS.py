@@ -18,8 +18,7 @@ REQUESTS = [
     (0x00, 0x01, "Request File Info (SD)"),
     (0x00, 0x02, "Request File Data (SD)"),
     (0x01, 0x00, "Request Pi Status (VR)"),
-    (0x01, 0x01, "Request Capture (VR)"),
-    (0x01, 0x02, "Request Copy Image to SD (VR)")
+    (0x01, 0x01, "Request Capture (VR)")
 ]
 
 def colorize_raw_frame(frame: bytes) -> str:
@@ -53,11 +52,27 @@ def cli_thread():
             choice = input()
             idx = int(choice.strip())
             if 0 <= idx < len(REQUESTS):
-                command_queue.put(REQUESTS[idx])
+                p_id, pid, desc = REQUESTS[idx]
+                req_data = b''
+                
+                # Build specific request paylods
+                if p_id == 0x00 and pid == 0x01: # Info
+                    fname = input("  Enter Filename: ").encode()
+                    req_data = struct.pack('>B', len(fname)) + fname
+                elif p_id == 0x00 and pid == 0x02: # File Data
+                    fname = input("  Enter Filename: ").encode()
+                    offset = int(input("  Enter Offset: ") or "0")
+                    length = int(input("  Enter Read Length: ") or "1024")
+                    req_data = struct.pack('>B', len(fname)) + fname + struct.pack('>IH', offset, length)
+                elif p_id == 0x01 and pid == 0x01: # Capture
+                    res = int(input("  Enter Resolution (0=1080p, 1=720p): ") or "0")
+                    req_data = struct.pack('>B', res)
+                    
+                command_queue.put((p_id, pid, desc, req_data))
             else:
                 print("Invalid choice.")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Input Error: {e}")
 
 def build_custom_payload(payload_id: int, pid: int, seq_num: int, data: bytes) -> bytes:
     data_len = len(data)
@@ -92,9 +107,9 @@ def main():
     while True:
         # 1. Process CLI Commands
         try:
-            target_p_id, target_pid, desc = command_queue.get_nowait()
+            target_p_id, target_pid, desc, req_data = command_queue.get_nowait()
             print(f"\n[GS] Sending: {desc} (PayloadID: 0x{target_p_id:02X}, PID: 0x{target_pid:02X})")
-            custom_payload = build_custom_payload(target_p_id, target_pid, 0x00, b'') 
+            custom_payload = build_custom_payload(target_p_id, target_pid, 0x00, req_data) 
             req_frame = KISSProtocol.wrap_frame(custom_payload, command=0x00)
             
             print("  Color Legend: \033[90mFEND\033[0m \033[95mCMD\033[0m \033[94mSEQ\033[0m \033[93mPL_ID\033[0m \033[96mPID\033[0m \033[92mLEN\033[0m \033[97mDATA\033[0m \033[91mCRC\033[0m \033[90mFEND\033[0m")
@@ -123,13 +138,43 @@ def main():
                             
                             # Handle Data Frame (Command 0x01)
                             if cmd == 0x01:
-                                try:
-                                    decoded_text = data.decode('utf-8')
-                                except UnicodeDecodeError:
-                                    decoded_text = f"<binary data: {data.hex()}>"
-                                    
                                 print(f"  <- Received Response [PayloadID: 0x{p_id:02X}, PID: 0x{pid:02X}, Seq: {seq}]")
-                                print(f"     Content: \033[93m{decoded_text}\033[0m")
+                                try:
+                                    if p_id == 0x00:
+                                        if pid == 0x00: # List Files
+                                            num_files = data[0]
+                                            print(f"     Found {num_files} files:")
+                                            offset = 1
+                                            for _ in range(num_files):
+                                                name_len = data[offset]
+                                                name = data[offset+1 : offset+1+name_len].decode()
+                                                print(f"       - {name}")
+                                                offset += 1 + name_len
+                                                
+                                        elif pid == 0x01: # File Info
+                                            status, size, ts = struct.unpack('>BII', data)
+                                            s_str = "OK" if status == 0 else "Error"
+                                            print(f"     Status: {s_str} | Size: {size} bytes | Created: {ts}")
+                                            
+                                        elif pid == 0x02: # File Data
+                                            status, offset, dl = struct.unpack('>BII', data[:9])
+                                            chunk = data[9:9+dl]
+                                            print(f"     Status: {status} | Offset: {offset} | Len: {dl}")
+                                            print(f"     Data: {chunk.hex(' ')}")
+                                            
+                                    elif p_id == 0x01:
+                                        if pid == 0x00: # Pi Status
+                                            cpu, ram, cam = struct.unpack('>bBB', data)
+                                            cam_str = {0:"Err", 1:"Ready", 2:"Busy"}.get(cam, "Unknown")
+                                            print(f"     Pi Status -> CPU: {cpu}C | RAM: {ram}% | CAM: {cam_str}")
+                                            
+                                        elif pid == 0x01: # Capture
+                                            status, name_len = struct.unpack('>BB', data[:2])
+                                            name = data[2:2+name_len].decode()
+                                            print(f"     Capture -> Status: {status} | File: {name}")
+
+                                except Exception as e:
+                                    print(f"     \033[91mParse Error:\033[0m {e} (Raw: {data.hex()})")
                                 
                                 highest_seq_received = max(highest_seq_received, seq)
                                 packets_received_in_window += 1
