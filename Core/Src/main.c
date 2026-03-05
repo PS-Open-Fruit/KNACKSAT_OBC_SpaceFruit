@@ -97,7 +97,7 @@ osThreadId_t USBTaskHandle;
 const osThreadAttr_t USBTask_attributes = {
   .name = "USBTask",
   .stack_size = 4096 * 4,
-  .priority = (osPriority_t) osPriorityAboveNormal,
+  .priority = (osPriority_t) osPriorityAboveNormal7,
 };
 /* Definitions for wdtFeed */
 osThreadId_t wdtFeedHandle;
@@ -169,12 +169,17 @@ const osEventFlagsAttr_t epsFlag_attributes = {
   .name = "epsFlag"
 };
 /* USER CODE BEGIN PV */
+/* In your global/header section — replace the old commu vars */
+#define COMMU_RX_SIZE     64
+#define COMMU_BUF_SIZE   256   // accumulation buffer, large enough for multi-chunk frames
+#define UART_MUTEX_TIMEOUT 1000
 
-uint8_t commTempBuf = 0;
-uint8_t commu_data_len = 0;
-uint8_t commu_data_buff[64] = {0};
-// extern osSemaphoreId_t norTxSemaphoreHandle;
-// extern osSemaphoreId_t norRxSemaphoreHandle;
+static uint8_t commu_temp_buff[COMMU_RX_SIZE];   // DMA landing buffer (single chunk)
+static uint8_t commu_data_buff[COMMU_BUF_SIZE];  // accumulation buffer
+static uint16_t commu_offset = 0;                // how many bytes accumulated so far
+static uint8_t commu_global_buff[COMMU_RX_SIZE];   // DMA landing buffer (single chunk)
+uint16_t commu_size = 0;
+uint8_t commu_data_ready = 0;
 
 osMessageQueueId_t communicationUartQueueHandle;
 const osMessageQueueAttr_t communicationUartQueue_attributes = {
@@ -700,7 +705,7 @@ static void MX_UART4_Init(void)
 
   /* USER CODE END UART4_Init 1 */
   huart4.Instance = UART4;
-  huart4.Init.BaudRate = 115200;
+  huart4.Init.BaudRate = 9600;
   huart4.Init.WordLength = UART_WORDLENGTH_8B;
   huart4.Init.StopBits = UART_STOPBITS_1;
   huart4.Init.Parity = UART_PARITY_NONE;
@@ -1070,14 +1075,13 @@ PUTCHAR_PROTOTYPE
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-    if (huart->Instance == EPS_UART.Instance){
-      osMessageQueuePut(epsUartQueueHandle, (void *)&Size, 0, 0);
+    if (huart->Instance == EPS_UART.Instance) {
+        osMessageQueuePut(epsUartQueueHandle, (void *)&Size, 0, 0);
     }
-    // if (huart->Instance == DBG_UART.Instance){
-
-    // }
-
-
+    if (huart->Instance == COM_UART.Instance) {
+        osMessageQueuePut(communicationUartQueueHandle, &Size, 0, 0);
+        /* Do NOT re-arm here — let the task do it after copying commu_temp_buff */
+    }
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
@@ -1087,11 +1091,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
     // printf("callback index : %u\r\n",Size);
     // osSemaphoreRelease(epsDataSemHandle);
     // osMessageQueuePut(epsUartQueueHandle, (void *)&ready, 0, 0);
-  }
-
-  if (huart->Instance == COM_UART.Instance){
-    HAL_UART_Receive_IT(&COM_UART,&commTempBuf,1);
-    osSemaphoreRelease(commuSemaphoreHandle);
   }
 
 }
@@ -1270,9 +1269,14 @@ void mainTask(void *argument)
   };
   rv3028c7_init(&rtc);
   date_time_t datetime;
-  HAL_UART_Receive_IT(&COM_UART,&commTempBuf,1);
-  osDelay(2000);
-  osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+  uint8_t temp_commu_data_buff[COMMU_BUF_SIZE];  // accumulation buffer
+  uint8_t decode_buf[COMMU_BUF_SIZE] = {0};
+  uint8_t kiss_content[COMMU_BUF_SIZE] = {0};
+  kiss_frame_t output_frame = {
+    .content = kiss_content
+  };
+  // osDelay(2000);
+  // osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
   /* Infinite loop */
   for(;;)
   {
@@ -1295,10 +1299,35 @@ void mainTask(void *argument)
     printf("Temperature : %ld\r\n", _obc_sensors.temp);
     printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensors.datetime.year, _obc_sensors.datetime.month, _obc_sensors.datetime.day, _obc_sensors.datetime.hour, _obc_sensors.datetime.min, _obc_sensors.datetime.sec);
 
+    if (osMutexAcquire(uartMutexHandle,UART_MUTEX_TIMEOUT) == osOK){
+      if (commu_data_ready){
+        commu_data_ready = 0;
+        printf("commu ready\r\n");
+        memcpy(temp_commu_data_buff,commu_data_buff,commu_size);
+        uint16_t buff_size = commu_size;
+        kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
+        
+        printf("ret = %d\r\n",status_kiss);
+        if (status_kiss == KISS_VALID_DATA){
+          printf("Valid commu data\r\n");
+          if (output_frame.payload_id == KISS_PAYLOAD_ID_VR && output_frame.pid == KISS_VR_PID_IMAGE_REQUEST){
+            osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+            printf("Download image command\r\n");
+          }
+        }
+      }
+      osMutexRelease(uartMutexHandle);
+    }
     // if(KISS_IsFrameComplete(commu_data_buff,commu_data_len)){
     //   printf("Commu frame complete in main task\r\n");
     // }
-
+    // uint8_t cmd_encoded1[32] = {0};
+    // uint8_t request_content1[3] = {0x00,0xFF,0xFF};
+    // uint16_t req_len1 = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,request_content1,3,KISS_CMD_DATA, cmd_encoded1);
+    // printf("KISS Frame Encoded : ");
+    // for (int i = 0; i < req_len1;i++){
+    //   printf("0x%02X ",cmd_encoded1[i]);
+    // }
     if (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IDLE){
       uint8_t cmd_encoded[32] = {0};
       uint8_t request_content[3] = {0x00,0xFF,0xFF};
@@ -1395,7 +1424,7 @@ void usbTask(void *argument)
 
     kiss_frame_t decoded_payload = { .content = payload_content };
 
-    osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
+    // osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
 
     //some variables for FatFs
     FATFS FatFs; 	//Fatfs handle
@@ -1408,7 +1437,6 @@ void usbTask(void *argument)
                                              (void *)&usb_data_rx,
                                              NULL, osWaitForever);
         if (status != osOK) continue;
-
         /* --- Accumulate --- */
         if ((current_offset + usb_data_rx.len) > sizeof(temp_buf))
         {
@@ -1420,9 +1448,10 @@ void usbTask(void *argument)
 
         memcpy(&temp_buf[current_offset], usb_data_rx.usb_buff, usb_data_rx.len);
         current_offset += usb_data_rx.len;
-
+        uint8_t check = KISS_IsFrameComplete(temp_buf, current_offset);
+        
         /* --- O(1) completion check, no CRC yet --- */
-        if (!KISS_IsFrameComplete(temp_buf, current_offset))
+        if (!check)
         {
             /* Frame not done yet, wait for more chunks */
             continue;
@@ -1433,13 +1462,6 @@ void usbTask(void *argument)
 
         kiss_status_t result = KISS_UnwrapFrame(temp_buf, current_offset,
                                                 payload_content, &decoded_payload);
-
-        if (result != KISS_VALID_DATA){
-          for (int i = 0; i < current_offset;i++){
-            printf("%02X ", temp_buf[i]);
-          }
-          printf("\r\n");
-        }
 
         current_offset = 0; /* Reset accumulator regardless of outcome */
 
@@ -1572,6 +1594,7 @@ void sensorQueryTask(void *argument)
 
  
   tmp1075_init(&temp_sen);
+
   for (;;)
   {
     // osEventFlagsWait(epsFlagHandle,EPS_FLAG_POLL_START,osFlagsWaitAny,osWaitForever);
@@ -1587,7 +1610,7 @@ void sensorQueryTask(void *argument)
     // {
     //   printf("Read RTC Error");
     // }
-    printf("Loops Sensor Query Runs normally\r\n");
+    // printf("Loops Sensor Query Runs normally\r\n");
     /* Perform VI Sensor Reads for 6 Channel */
     for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
       eps_command_t cmd;
@@ -1701,29 +1724,67 @@ void logTask(void *argument)
 void uartRx(void *argument)
 {
   /* USER CODE BEGIN uartRx */
-  typedef enum {
-    DATA_STATE_IDLE,
-    DATA_STATE_RECEIVING,
-  } uart_state;
-  uint16_t commu_rx_len = 0;
-  uint8_t commu_state = DATA_STATE_IDLE;
-  uint8_t commu_offset = 0;
-  uint16_t eps_rx_len = 0;
-  // osDelay(2000);
+    uint16_t chunk_len = 0;
+    /* Arm the very first receive — do it here, not in mainTask */
+    HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
   /* Infinite loop */
   for(;;)
   {
-    // printf("Loop of uartRx Task\r\n");
-    osSemaphoreAcquire(commuSemaphoreHandle,osWaitForever);
-      commu_data_buff[commu_offset] = commTempBuf;
-      commu_offset += 1;
-      uint8_t check = KISS_IsFrameComplete(commu_data_buff,commu_offset);
-      printf("RX Commu %d is it kiss? %d\r\n",commu_offset,check);
-      if (check){
-        printf("COMMU KISS Valid Frame\r\n");
-        commu_data_len = commu_offset;
+     for (;;)
+    {
+        /* Block until the idle-line ISR signals a chunk arrived */
+        osStatus_t status = osMessageQueueGet(communicationUartQueueHandle,
+                                              &chunk_len, NULL, osWaitForever);
+        if (status != osOK) continue;
+
+        /* --- Re-arm RX immediately so we don't miss the next bytes --- */
+        HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
+
+        /* --- Overflow guard --- */
+        if ((commu_offset + chunk_len) > COMMU_BUF_SIZE)
+        {
+            printf("COMMU: buffer overflow, resetting\r\n");
+            commu_offset = 0;
+            continue;
+        }
+
+        /* --- Append chunk to accumulation buffer --- */
+        memcpy(&commu_data_buff[commu_offset], commu_temp_buff, chunk_len);
+        commu_offset += chunk_len;
+        
+        /* --- Debug print of what we have so far --- */
+        printf("COMMU RX [%d bytes total]: ", commu_offset);
+        for (int i = 0; i < commu_offset; i++) {
+          printf("%02X ", commu_data_buff[i]);
+        }
+        printf("\r\n");
+        
+        /* --- Check if we have a complete KISS frame --- */
+        if (!KISS_IsFrameComplete(commu_data_buff, commu_offset))
+        {
+            printf("COMMU: frame incomplete, waiting for more...\r\n");
+            continue;
+          }
+          
+          /* --- Complete frame: hand it off --- */
+          printf("COMMU: complete KISS frame (%d bytes)\r\n", commu_offset);
+          osMutexAcquire(uartMutexHandle,UART_MUTEX_TIMEOUT);
+          for (int i = 0; i < commu_offset;i++){
+            commu_global_buff[i] = commu_data_buff[i];
+          }
+          commu_size = commu_offset;
+          commu_data_ready = 1;
+          osMutexRelease(uartMutexHandle);  
+          
+        /* 
+         * TODO: process commu_data_buff / commu_offset here.
+         * e.g. KISS_UnwrapFrame(commu_data_buff, commu_offset, ...)
+         * or copy into a queue for another task.
+         */
+
+        /* Reset accumulator for the next frame */
         commu_offset = 0;
-      }
+    }
   }
   /* USER CODE END uartRx */
 }
