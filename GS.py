@@ -157,8 +157,8 @@ def main():
                                             print(f"     Status: {s_str} | Size: {size} bytes | Created: {ts}")
                                             
                                         elif pid == 0x02: # File Data
-                                            status, offset, dl = struct.unpack('>BII', data[:9])
-                                            chunk = data[9:9+dl]
+                                            status, offset, dl = struct.unpack('>BIH', data[:7])
+                                            chunk = data[7:7+dl]
                                             print(f"     Status: {status} | Offset: {offset} | Len: {dl}")
                                             print(f"     Data: {chunk.hex(' ')}")
                                             

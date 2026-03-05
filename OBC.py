@@ -126,10 +126,10 @@ def main():
                                         
                                     elif pid == 0x02: # File Data (Chunk)
                                         chunk = b'\\xFF\\xD8\\xFF\\xE0\\x00\\x10JFIF' # 10 byte jpeg header
-                                        dummy_data = struct.pack('>BII', 
+                                        dummy_data = struct.pack('>BIH', 
                                             0x00,          # Status: OK
                                             0,             # Offset: 0
-                                            len(chunk)     # ActualDataLength
+                                            len(chunk)     # ActualDataLength (uint16)
                                         ) + chunk
 
                                 elif p_id == VR_SUBSYSTEM:
