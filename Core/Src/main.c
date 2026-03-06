@@ -31,8 +31,11 @@
 #include "littlefs_port.h"
 #include "kiss_utils.h"
 #include "obc_helper.h"
-#include "eps_helper.h"
+#include "eps_protocol.h"
 #include "sd_spi.h"
+#include "kiss_protocol.h"
+#include "protocol_utils.h"
+#include "commu_helper.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -153,38 +156,13 @@ osMutexId_t sensorsMutexHandle;
 const osMutexAttr_t sensorsMutex_attributes = {
   .name = "sensorsMutex"
 };
-/* Definitions for uartMutex */
-osMutexId_t uartMutexHandle;
-const osMutexAttr_t uartMutex_attributes = {
-  .name = "uartMutex"
-};
-/* Definitions for myBinarySem01 */
-osSemaphoreId_t myBinarySem01Handle;
-const osSemaphoreAttr_t myBinarySem01_attributes = {
-  .name = "myBinarySem01"
-};
 /* Definitions for epsFlag */
 osEventFlagsId_t epsFlagHandle;
 const osEventFlagsAttr_t epsFlag_attributes = {
   .name = "epsFlag"
 };
 /* USER CODE BEGIN PV */
-/* In your global/header section — replace the old commu vars */
-#define COMMU_RX_SIZE     64
-#define COMMU_BUF_SIZE   256   // accumulation buffer, large enough for multi-chunk frames
-#define UART_MUTEX_TIMEOUT 1000
 
-static uint8_t commu_temp_buff[COMMU_RX_SIZE];   // DMA landing buffer (single chunk)
-static uint8_t commu_data_buff[COMMU_BUF_SIZE];  // accumulation buffer
-static uint16_t commu_offset = 0;                // how many bytes accumulated so far
-static uint8_t commu_global_buff[COMMU_RX_SIZE];   // DMA landing buffer (single chunk)
-uint16_t commu_size = 0;
-uint8_t commu_data_ready = 0;
-
-osMessageQueueId_t communicationUartQueueHandle;
-const osMessageQueueAttr_t communicationUartQueue_attributes = {
-  .name = "communicationUartQueue"
-};
 
 osEventFlagsId_t payloadFlagHandle;
 const osEventFlagsAttr_t payloadFlag_attr = {
@@ -197,11 +175,6 @@ kiss_frame_t payload_kiss;
 osSemaphoreId_t norSemaphoreHandle;
 const osSemaphoreAttr_t norSemaphoreAttr = {
   .name = "norFlashSemaphore"
-};
-
-osSemaphoreId_t commuSemaphoreHandle;
-const osSemaphoreAttr_t commuSemaphoreAttr = {
-  .name = "commuSemaphore"
 };
 
 osSemaphoreId_t epsSemaphoreHandle;
@@ -316,6 +289,8 @@ int main(void)
   MX_IWDG_Init();
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
+  commu_init();
+  eps_init();
   // HAL_CAN_Start(&hcan2);
 
   // rv3028c7_set_hour(&rtc,8);
@@ -329,16 +304,9 @@ int main(void)
   /* creation of sensorsMutex */
   sensorsMutexHandle = osMutexNew(&sensorsMutex_attributes);
 
-  /* creation of uartMutex */
-  uartMutexHandle = osMutexNew(&uartMutex_attributes);
-
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
-
-  /* Create the semaphores(s) */
-  /* creation of myBinarySem01 */
-  myBinarySem01Handle = osSemaphoreNew(1, 1, &myBinarySem01_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -346,7 +314,6 @@ int main(void)
   sdRxSemaphoreHandle = osSemaphoreNew(1,0,&sdRxSemaphoreAttr);
   norSemaphoreHandle = osSemaphoreNew(1,0,&norSemaphoreAttr);
   epsSemaphoreHandle = osSemaphoreNew(1,0,&epsSemaphoreAttr);
-  commuSemaphoreHandle = osSemaphoreNew(1,0,&commuSemaphoreAttr);
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
@@ -364,7 +331,6 @@ int main(void)
   printQueueHandle = osMessageQueueNew (256, sizeof(uint8_t), &printQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
-  communicationUartQueueHandle = osMessageQueueNew(16,sizeof(uint16_t),&communicationUartQueue_attributes);
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
 
@@ -1011,13 +977,13 @@ uint16_t EPS_Perform_Transaction(uint8_t* cmd_buf, uint16_t cmd_len, uint8_t* ou
     // 1. Clear Queue (Flush old/stale messages so we read the fresh response)
     osMessageQueueReset(epsUartQueueHandle);
 
-    uint8_t frameRx[32] = {0};
+    uint8_t frameRx[128] = {0};
 
-    HAL_StatusTypeDef hal_ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART,frameRx,32);
+    HAL_StatusTypeDef hal_ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART,frameRx,128);
 
     if (hal_ret == HAL_BUSY) {
         HAL_UART_AbortReceive(&EPS_UART);
-        hal_ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART, frameRx, 32);
+        hal_ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART, frameRx, 128);
     }
 
     if (hal_ret != HAL_OK) {
@@ -1046,13 +1012,13 @@ uint16_t EPS_Perform_Transaction(uint8_t* cmd_buf, uint16_t cmd_len, uint8_t* ou
     if (rx_len == 0) return 0;
 
     // 5. Validate KISS
-    if (KISS_ValidateFrame(frameRx, rx_len) != KISS_VALID_DATA) {
+    if (!KISS_IsFrameComplete(frameRx, rx_len)) {
         return 0; 
     }
 
     // 6. Decode SLIP (Remove Escapes)
     // Returns the length of the clean data
-    return KISS_SLIP_DECODE(frameRx, rx_len, out_buf);
+    return KISS_Decode(frameRx, rx_len, out_buf);
 }
 
 
@@ -1109,7 +1075,7 @@ void mainTask(void *argument)
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 5 */
-  printf("\ecStart of mainTask\r\n");
+  printf("Start of mainTask\r\n");
   osThreadSuspend(sensorQueryHandle);
   gpio_t cs_flash = {
       .GPIOx = NOR_CS_GPIO_Port,
@@ -1172,89 +1138,89 @@ void mainTask(void *argument)
   printf("boot_count: %ld\r\n", boot_count);
   // print the boot count
 
-  printf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
+  // printf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
 
-    //some variables for FatFs
-    FATFS FatFs; 	//Fatfs handle
-    FIL fil; 		//File handle
-    FRESULT fres; //Result after operations
+  //   //some variables for FatFs
+  //   FATFS FatFs; 	//Fatfs handle
+  //   FIL fil; 		//File handle
+  //   FRESULT fres; //Result after operations
 
-    //Open the file system
-    fres = f_mount(&FatFs, "", 1); //1=mount now
-    if (fres != FR_OK) {
-  	printf("f_mount error (%i)\r\n", fres);
-      while(1){
-        osDelay(1);
-      }
-    }
+  //   //Open the file system
+  //   fres = f_mount(&FatFs, "", 1); //1=mount now
+  //   if (fres != FR_OK) {
+  // 	printf("f_mount error (%i)\r\n", fres);
+  //     while(1){
+  //       osDelay(1);
+  //     }
+  //   }
 
-    //Let's get some statistics from the SD card
-    DWORD free_clusters, free_sectors, total_sectors;
+  //   //Let's get some statistics from the SD card
+  //   DWORD free_clusters, free_sectors, total_sectors;
 
-    FATFS* getFreeFs;
+  //   FATFS* getFreeFs;
 
-    fres = f_getfree("", &free_clusters, &getFreeFs);
-    if (fres != FR_OK) {
-  	printf("f_getfree error (%i)\r\n", fres);
-      while(1){
-        osDelay(1);
-      }
-    }
+  //   fres = f_getfree("", &free_clusters, &getFreeFs);
+  //   if (fres != FR_OK) {
+  // 	printf("f_getfree error (%i)\r\n", fres);
+  //     while(1){
+  //       osDelay(1);
+  //     }
+  //   }
 
-    //Formula comes from ChaN's documentation
-    total_sectors = (getFreeFs->n_fatent - 2) * getFreeFs->csize;
-    free_sectors = free_clusters * getFreeFs->csize;
+  //   //Formula comes from ChaN's documentation
+  //   total_sectors = (getFreeFs->n_fatent - 2) * getFreeFs->csize;
+  //   free_sectors = free_clusters * getFreeFs->csize;
 
-    printf("SD card stats:\r\n%10lu KiB total drive space.\r\n%10lu KiB available.\r\n", total_sectors / 2, free_sectors / 2);
+  //   printf("SD card stats:\r\n%10lu KiB total drive space.\r\n%10lu KiB available.\r\n", total_sectors / 2, free_sectors / 2);
 
-    //Now let's try to open file "test.txt"
-    fres = f_open(&fil, "test.txt", FA_READ);
-    if (fres != FR_OK) {
-  	printf("f_open error (%i)\r\n", fres);
-      while(1){
-        osDelay(1);
-      }
-    }
-    printf("I was able to open 'test.txt' for reading!\r\n");
+  //   //Now let's try to open file "test.txt"
+  //   fres = f_open(&fil, "test.txt", FA_READ);
+  //   if (fres != FR_OK) {
+  // 	printf("f_open error (%i)\r\n", fres);
+  //     while(1){
+  //       osDelay(1);
+  //     }
+  //   }
+  //   printf("I was able to open 'test.txt' for reading!\r\n");
 
-    //Read 30 bytes from "test.txt" on the SD card
-    BYTE readBuf[30];
+  //   //Read 30 bytes from "test.txt" on the SD card
+  //   BYTE readBuf[30];
 
-    //We can either use f_read OR f_gets to get data out of files
-    //f_gets is a wrapper on f_read that does some string formatting for us
-    TCHAR* rres = f_gets((TCHAR*)readBuf, 30, &fil);
-    if(rres != 0) {
-  	printf("Read string from 'test.txt' contents: %s\r\n", readBuf);
-    } else {
-  	printf("f_gets error (%i)\r\n", fres);
-    }
+  //   //We can either use f_read OR f_gets to get data out of files
+  //   //f_gets is a wrapper on f_read that does some string formatting for us
+  //   TCHAR* rres = f_gets((TCHAR*)readBuf, 30, &fil);
+  //   if(rres != 0) {
+  // 	printf("Read string from 'test.txt' contents: %s\r\n", readBuf);
+  //   } else {
+  // 	printf("f_gets error (%i)\r\n", fres);
+  //   }
 
-    //Be a tidy kiwi - don't forget to close your file!
-    f_close(&fil);
+  //   //Be a tidy kiwi - don't forget to close your file!
+  //   f_close(&fil);
 
-    //Now let's try and write a file "write.txt"
-    fres = f_open(&fil, "write.txt", FA_WRITE | FA_OPEN_ALWAYS | FA_CREATE_ALWAYS);
-    if(fres == FR_OK) {
-  	printf("I was able to open 'write.txt' for writing\r\n");
-    } else {
-  	printf("f_open error (%i)\r\n", fres);
-    }
+  //   //Now let's try and write a file "write.txt"
+  //   fres = f_open(&fil, "write.txt", FA_WRITE | FA_OPEN_ALWAYS | FA_CREATE_ALWAYS);
+  //   if(fres == FR_OK) {
+  // 	printf("I was able to open 'write.txt' for writing\r\n");
+  //   } else {
+  // 	printf("f_open error (%i)\r\n", fres);
+  //   }
 
-    //Copy in a string
-    strncpy((char*)readBuf, "a new file is made!", 19);
-    UINT bytesWrote;
-    fres = f_write(&fil, readBuf, 19, &bytesWrote);
-    if(fres == FR_OK) {
-  	printf("Wrote %i bytes to 'write.txt'!\r\n", bytesWrote);
-    } else {
-  	printf("f_write error (%i)\r\n", fres);
-    }
+  //   //Copy in a string
+  //   strncpy((char*)readBuf, "a new file is made!", 19);
+  //   UINT bytesWrote;
+  //   fres = f_write(&fil, readBuf, 19, &bytesWrote);
+  //   if(fres == FR_OK) {
+  // 	printf("Wrote %i bytes to 'write.txt'!\r\n", bytesWrote);
+  //   } else {
+  // 	printf("f_write error (%i)\r\n", fres);
+  //   }
 
-    //Be a tidy kiwi - don't forget to close your file!
-    f_close(&fil);
+  //   //Be a tidy kiwi - don't forget to close your file!
+  //   f_close(&fil);
 
-    //We're done, so de-mount the drive
-    f_mount(NULL, "", 0);
+  //   //We're done, so de-mount the drive
+  //   f_mount(NULL, "", 0);
 
 
   osThreadResume(sensorQueryHandle);
@@ -1313,21 +1279,17 @@ void mainTask(void *argument)
           if (output_frame.payload_id == KISS_PAYLOAD_ID_VR && output_frame.pid == KISS_VR_PID_IMAGE_REQUEST){
             osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
             printf("Download image command\r\n");
+            uint8_t ack_msg[32] = {0x00,0xAC};
+            uint16_t ack_len = 0;
+            uint8_t msg[32] = {0};
+            ack_len = KISS_Encode(ack_msg,2,msg);
+            HAL_UART_Transmit_IT(&COM_UART,msg,ack_len);
           }
         }
       }
       osMutexRelease(uartMutexHandle);
     }
-    // if(KISS_IsFrameComplete(commu_data_buff,commu_data_len)){
-    //   printf("Commu frame complete in main task\r\n");
-    // }
-    // uint8_t cmd_encoded1[32] = {0};
-    // uint8_t request_content1[3] = {0x00,0xFF,0xFF};
-    // uint16_t req_len1 = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,request_content1,3,KISS_CMD_DATA, cmd_encoded1);
-    // printf("KISS Frame Encoded : ");
-    // for (int i = 0; i < req_len1;i++){
-    //   printf("0x%02X ",cmd_encoded1[i]);
-    // }
+
     if (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IDLE){
       uint8_t cmd_encoded[32] = {0};
       uint8_t request_content[3] = {0x00,0xFF,0xFF};
@@ -1342,6 +1304,7 @@ void mainTask(void *argument)
       printf("\r\n");
     }
 
+    
     for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
       uint8_t channel = _eps_sensors.vi_sensor[i].channel;
       int16_t voltage = _eps_sensors.vi_sensor[i].voltage;
@@ -1374,12 +1337,12 @@ void mainTask(void *argument)
 
     for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
       uint8_t channel = _eps_sensors.battery_temperature[i].channel;
-      int16_t temp = _eps_sensors.battery_temperature[i].temperature * 10000;
+      int16_t temp = _eps_sensors.battery_temperature[i].temperature * 1000;
       eps_data_state data_state = _eps_sensors.battery_temperature[i].data_state;
       if (data_state != EPS_DATA_OK){
         continue;
       }
-      printf("Battery Temperature CH %d, State %d\r\n",channel,temp);
+      printf("Battery Temperature CH %d, Temperature %d State %d\r\n",channel,temp,data_state);
     }
 
     // }
@@ -1398,7 +1361,7 @@ void mainTask(void *argument)
     // }
 
     printf("\r\n");
-    osDelay(1000);
+    osDelay(2000);
   }
   // printf("It exits main task\r\n");
   /* USER CODE END 5 */
@@ -1606,74 +1569,62 @@ void sensorQueryTask(void *argument)
     }
     
     
-    // if (ret != hal_ok)
-    // {
-    //   printf("Read RTC Error");
-    // }
-    // printf("Loops Sensor Query Runs normally\r\n");
-    /* Perform VI Sensor Reads for 6 Channel */
-    for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
-      eps_command_t cmd;
-      uint8_t eps_data[32] = {0};
-      eps_get_vi_sensor_kiss_command(i,&cmd);
-      uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
-      // printf("Decoded LEN %d\r\n",decoded_len);
-      if (decoded_len == 0){
-        _eps_sensors.vi_sensor[i].data_state = EPS_DATA_ERROR;
-        continue;
-      }
-      _eps_sensors.vi_sensor[i].voltage = (eps_data[1] << 8) | eps_data[0];
-      _eps_sensors.vi_sensor[i].current = (eps_data[3] << 8) | eps_data[2];
-      _eps_sensors.vi_sensor[i].channel = eps_data[4];
-      _eps_sensors.vi_sensor[i].data_state = EPS_DATA_OK;
-    }
-
-    /* Perform Output Sensor Reads for 6 Channel */
-    for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
-      eps_command_t cmd;
-      uint8_t eps_data[32] = {0};
-      eps_get_output_sensor_kiss_command(i,&cmd);
-      uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
-      if (decoded_len == 0){
-        _eps_sensors.output_sensor[i].data_state = EPS_DATA_ERROR;
-        continue;
-      }
-      _eps_sensors.output_sensor[i].voltage = (eps_data[1] << 8) | eps_data[0];
-      _eps_sensors.output_sensor[i].current = (eps_data[3] << 8) | eps_data[2];
-      _eps_sensors.output_sensor[i].channel = eps_data[4];
-      _eps_sensors.output_sensor[i].data_state = EPS_DATA_OK;
-    }
-
-    /* Perform Output State Reads for 6 Channel */
-    for (int i = 0; i < EPS_NUM_OUTPUT_CHANNEL;i++){
-      eps_command_t cmd;
-      uint8_t eps_data[32] = {0};
-      eps_get_output_state_kiss_command(i,&cmd);
-      uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
-      if (decoded_len == 0){
-        _eps_sensors.output_sensor[i].data_state = EPS_DATA_ERROR;
-        continue;
-      }
-      _eps_sensors.output_state[i].status = eps_data[0];
-      _eps_sensors.output_state[i].channel = eps_data[1];
-      _eps_sensors.output_state[i].data_state = EPS_DATA_OK;
-    }
-
     /* Perform Battery Temperatures Reads for 6 Channel */
-    for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
-      eps_command_t cmd;
-      uint8_t eps_data[32] = {0};
-      eps_get_battery_temperature_kiss_command(i,&cmd);
-      uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
-      if (decoded_len == 0){
-        _eps_sensors.output_sensor[i].data_state = EPS_DATA_ERROR;
-        continue;
+    // for (int i = 0; i < EPS_NUM_TEMP_BATT;i++){
+    eps_command_t cmd;
+    uint8_t eps_data[EPS_BUF_SIZE] = {0};
+    eps_get_all_kiss_command(&cmd);
+    uint16_t decoded_len = EPS_Perform_Transaction(cmd.cmd,cmd.len,eps_data);
+
+    uint16_t offset = 0;
+    if (decoded_len != 0){
+
+      // 1. Parse VI Sensors (8 Channels * 5 bytes = 40 bytes)
+      for (uint8_t i = 0; i < EPS_NUM_VI_CHANNEL; i++) {
+          if (offset + 5 > decoded_len) break; // Safety bounds check
+          
+          memcpy(&_eps_sensors.vi_sensor[i].voltage, &eps_data[offset], 2);
+          offset += 2;
+          memcpy(&_eps_sensors.vi_sensor[i].current, &eps_data[offset], 2);
+          offset += 2;
+          
+          _eps_sensors.vi_sensor[i].channel = eps_data[offset++];
+          _eps_sensors.vi_sensor[i].data_state = EPS_DATA_OK;
       }
-      memcpy(&_eps_sensors.battery_temperature[i].temperature, &eps_data[0], sizeof(float));
-      _eps_sensors.battery_temperature[i].channel = eps_data[4];
-      _eps_sensors.battery_temperature[i].data_state = EPS_DATA_OK;
+  
+      // 2. Parse Output Sensors (6 Channels * 5 bytes = 30 bytes)
+      for (uint8_t i = 0; i < EPS_NUM_OUTPUT_CHANNEL; i++) {
+          if (offset + 5 > decoded_len) break;
+          
+          memcpy(&_eps_sensors.output_sensor[i].voltage, &eps_data[offset], 2);
+          offset += 2;
+          memcpy(&_eps_sensors.output_sensor[i].current, &eps_data[offset], 2);
+          offset += 2;
+          
+          _eps_sensors.output_sensor[i].channel = eps_data[offset++];
+          _eps_sensors.output_sensor[i].data_state = EPS_DATA_OK;
+      }
+  
+      // 3. Parse Output States (6 Channels * 2 bytes = 12 bytes)
+      for (uint8_t i = 0; i < EPS_NUM_OUTPUT_CHANNEL; i++) {
+          if (offset + 2 > decoded_len) break;
+          
+          _eps_sensors.output_state[i].status = eps_data[offset++];
+          _eps_sensors.output_state[i].channel = eps_data[offset++];
+          _eps_sensors.output_state[i].data_state = EPS_DATA_OK;
+      }
+  
+      // 4. Parse Battery Temps (2 Channels * 5 bytes = 10 bytes)
+      for (uint8_t i = 0; i < EPS_NUM_TEMP_BATT; i++) {
+          if (offset + 5 > decoded_len) break;
+          
+          memcpy(&_eps_sensors.battery_temperature[i].temperature, &eps_data[offset], 4);
+          offset += 4;
+          
+          _eps_sensors.battery_temperature[i].channel = eps_data[offset++];
+          _eps_sensors.battery_temperature[i].data_state = EPS_DATA_OK;
+      }
     }
-    
     
     osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,500);
     if (os_ret == osOK){
