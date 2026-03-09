@@ -64,6 +64,53 @@ def parse_custom_payload(payload_bytes: bytes):
     data = content[5:5+data_len]
     return payload_id, pid, seq_num, data
 
+def dec_to_bcd(val):
+    return ((val // 10) << 4) | (val % 10)
+
+def generate_dummy_beacon_data() -> bytes:
+    b = bytearray()
+    
+    # 8 VI Sensors ('>hhBB') = 6 bytes each
+    for i in range(8):
+        v = 4000 + random.randint(-200, 200)
+        c = 500 + random.randint(-100, 100)
+        b += struct.pack('>hhBB', v, c, i, 2)
+        
+    # 6 Output Sensors ('>hhBB') = 6 bytes each
+    for i in range(6):
+        if i == 2:
+            b += struct.pack('>hhBB', 256, 256, i, 2)
+        elif i == 3:
+            b += struct.pack('>hhBB', 0, 512, i, 2)
+        else:
+            b += struct.pack('>hhBB', 0, 0, i, 2)
+            
+    # 6 Output States ('>BBB') = 3 bytes each
+    for i in range(6):
+        b += struct.pack('>BBB', 0 if i not in (1,2) else 4, i, 2)
+        
+    # 2 Battery Temps ('>hBB') = 4 bytes each
+    for i in range(2):
+        t = int(25.5 * 100) + random.randint(-200, 200)
+        b += struct.pack('>hBB', t, i, 2)
+        
+    # RTC (7 Bytes BCD)
+    now = time.localtime()
+    sec_bcd = dec_to_bcd(now.tm_sec)
+    min_bcd = dec_to_bcd(now.tm_min)
+    hour_bcd = dec_to_bcd(now.tm_hour)
+    wday = now.tm_wday + 1 if now.tm_wday < 6 else 1 # Python wday is 0-6 (Mon-Sun), Target is usually 1-7.
+    day_bcd = dec_to_bcd(now.tm_mday)
+    mon_bcd = dec_to_bcd(now.tm_mon)
+    year_bcd = dec_to_bcd(now.tm_year % 100)
+    
+    b += struct.pack('>BBBBBBB', sec_bcd, min_bcd, hour_bcd, wday, day_bcd, mon_bcd, year_bcd)
+    
+    # TMP1075 (4 Bytes int32)
+    b += struct.pack('>i', 280000)
+    
+    return bytes(b)
+
 def main():
     ser = serial.Serial(PORT, BAUD, timeout=0.1)
     print(f"OBC Started on {PORT}. Waiting for Ground Station requests...")
@@ -72,7 +119,28 @@ def main():
     rx_buffer = bytearray()
     seq_counter = 0
     
+    # --- BEACON CONFIG ---
+    BEACON_ENABLED = False
+    last_beacon_time = time.time()
+    beacon_interval = 5.0  # seconds
+    
     while True:
+        # --- BEACON BROADCAST ---
+        if BEACON_ENABLED and (time.time() - last_beacon_time >= beacon_interval):
+            last_beacon_time = time.time()
+            beacon_data = generate_dummy_beacon_data()
+            seq_counter = (seq_counter + 1) % 256
+            
+            # PayloadID: 0x00 (OBC), PID: 0x04 (Beacon)
+            beacon_payload = build_custom_payload(OBC_SUBSYSTEM, 0x04, seq_counter, beacon_data)
+            
+            # Link Level Command 0x01 (Data/Response)
+            tx_frame = KISSProtocol.wrap_frame(beacon_payload, command=0x01)
+            
+            print(f"\n[OBC] Broadcasting EPS Beacon (121 bytes)...")
+            print(f"  -> TX Raw Frame: {colorize_raw_frame(tx_frame)}")
+            ser.write(tx_frame)
+
         byte = ser.read(1)
         if byte:
             if byte == FEND_BYTE:
