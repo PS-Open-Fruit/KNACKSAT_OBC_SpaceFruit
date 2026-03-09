@@ -117,6 +117,10 @@ def main():
     dl_total_size = 0
     dl_start_time = 0.0
     
+    last_request_time = 0.0
+    retry_count = 0
+    MAX_RETRIES = 5
+    
     print("\n[GS] Starting RX/TX Loops...")
     
     while True:
@@ -133,6 +137,8 @@ def main():
                 dl_offset = 0
                 dl_active = True
                 dl_total_size = 0
+                retry_count = 0
+                last_request_time = time.time()
                 
                 print(f"\n[GS] --- Starting Automated Download for '{fname}' ---")
                 # Request File Info first to determine file size
@@ -157,9 +163,22 @@ def main():
             print(f"  -> TX Raw Frame: {colorize_raw_frame(req_frame)}")
             ser.write(req_frame)
             
+            if dl_active:
+                last_request_time = time.time()
+            
             highest_seq_received = -1
             packets_received_in_window = 0
         except queue.Empty:
+            if dl_active and last_request_time > 0 and (time.time() - last_request_time > 2.0):
+                if retry_count < MAX_RETRIES:
+                    print(f"     \033[93m[GS] Timeout waiting for offset {dl_offset}. Retrying {retry_count + 1}/{MAX_RETRIES}...\033[0m")
+                    req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
+                    command_queue.put(('MANUAL', 0x00, 0x02, "Auto-Request Chunk Retry", req_data))
+                    last_request_time = time.time()
+                    retry_count += 1
+                else:
+                    print(f"     \033[91m[GS] Max retries reached. Download aborted.\033[0m")
+                    dl_active = False
             pass
 
         # 2. Process Incoming Bytes
@@ -242,6 +261,7 @@ def main():
                                                     # Automatic sliding window for the next chunk
                                                     if dl_active and dl == dl_chunk_size:
                                                         dl_offset += dl_chunk_size
+                                                        retry_count = 0
                                                         # print(f"     [GS] Auto-Requesting next chunk at offset {dl_offset}...")
                                                         time.sleep(0.05) # critical delay to let AS-32 hardware buffer clear
                                                         req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
