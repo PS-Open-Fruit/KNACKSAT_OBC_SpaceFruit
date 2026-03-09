@@ -16,15 +16,7 @@ from Shared.Python.kiss_protocol import KISSProtocol
 PORT = 'COM4'  # Change to your virtual or real COM port
 BAUD = 9600
 
-# --- SIMULATED REQUESTS (PayloadID, PID, Description) ---
-# Emulating the Excel design flow
-REQUESTS = [
-    (0x00, 0x00, "Request List files (SD)"),
-    (0x00, 0x01, "Request File Info (SD)"),
-    (0x00, 0x02, "Request File Data (SD)"),
-    (0x01, 0x00, "Request Pi Status (VR)"),
-    (0x01, 0x01, "Request Capture (VR)")
-]
+
 
 def colorize_raw_frame(frame: bytes) -> str:
     """Colors the raw KISS frame hex string for easier reading."""
@@ -47,35 +39,49 @@ def colorize_raw_frame(frame: bytes) -> str:
 command_queue = queue.Queue()
 
 def cli_thread():
-    print("\n\033[1;33m--- Command Line Interface ---\033[0m")
-    print("Commands:")
-    for i, req in enumerate(REQUESTS):
-        print(f"  {i}: {req[2]}")
-    print("\033[3mType the number and press Enter to send.\033[0m")
+    print("\n\033[1;33m--- Ground Station CLI ---\033[0m")
+    print("Type 'help' for a list of available commands.")
     while True:
         try:
-            choice = input()
-            idx = int(choice.strip())
-            if 0 <= idx < len(REQUESTS):
-                p_id, pid, desc = REQUESTS[idx]
-                req_data = b''
-                
-                # Build specific request paylods
-                if p_id == 0x00 and pid == 0x01: # Info
-                    fname = input("  Enter Filename: ").encode()
+            choice = input("GS> ").strip()
+            if not choice:
+                continue
+            
+            parts = choice.split()
+            cmd = parts[0].lower()
+            
+            if cmd == 'help':
+                print("Commands:")
+                print("  list                  - List files on OBC SD card")
+                print("  info <filename>       - Request file info")
+                print("  download <filename>   - Download file from OBC")
+                print("  status                - Request Pi Status")
+                print("  capture               - Request Image Capture")
+                print("  exit                  - Exit Ground Station")
+            elif cmd == 'list':
+                command_queue.put(('MANUAL', 0x00, 0x00, "Request List files (SD)", b''))
+            elif cmd == 'info':
+                if len(parts) > 1:
+                    fname = parts[1].encode()
                     req_data = struct.pack('>B', len(fname)) + fname
-                    command_queue.put(('MANUAL', p_id, pid, desc, req_data))
-                    
-                elif p_id == 0x00 and pid == 0x02: # File Data
-                    fname = input("  Enter Filename to Download: ")
-                    # Instead of queueing a raw request, we kick off an automated download state
-                    command_queue.put(('AUTO_DOWNLOAD', p_id, pid, desc, fname))
-                    
-                else: 
-                    # Standard manual request handling
-                    command_queue.put(('MANUAL', p_id, pid, desc, req_data))
+                    command_queue.put(('MANUAL', 0x00, 0x01, "Request File Info (SD)", req_data))
+                else:
+                    print("Usage: info <filename>")
+            elif cmd == 'download':
+                if len(parts) > 1:
+                    fname = parts[1]
+                    command_queue.put(('AUTO_DOWNLOAD', 0x00, 0x02, "Request File Data (SD)", fname))
+                else:
+                    print("Usage: download <filename>")
+            elif cmd == 'status':
+                command_queue.put(('MANUAL', 0x01, 0x00, "Request Pi Status (VR)", b''))
+            elif cmd == 'capture':
+                command_queue.put(('MANUAL', 0x01, 0x01, "Request Capture (VR)", b''))
+            elif cmd == 'exit':
+                print("Exiting...")
+                os._exit(0)
             else:
-                print("Invalid choice.")
+                print(f"Unknown command: {choice}. Type 'help' for commands.")
         except Exception as e:
             print(f"Input Error: {e}")
 
@@ -267,7 +273,11 @@ def main():
                                                         req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
                                                         command_queue.put(('MANUAL', 0x00, 0x02, "Auto-Request Chunk", req_data))
                                                     elif dl_active and dl < dl_chunk_size:
+                                                        elapsed_time = time.time() - dl_start_time
+                                                        avg_speed = dl_total_size / elapsed_time if elapsed_time > 0 and dl_total_size > 0 else 0
+                                                        speed_str = f"{avg_speed / 1024:.1f} KB/s" if avg_speed >= 1024 else f"{avg_speed:.1f} B/s"
                                                         print(f"     \033[92m[GS] Download Complete! '{current_download_file}' is fully retrieved.\033[0m")
+                                                        print(f"     \033[92m[GS] Total Time: {elapsed_time:.2f}s | Avg Speed: {speed_str}\033[0m")
                                                         dl_active = False
 
                                                 except Exception as e:
