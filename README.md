@@ -54,44 +54,69 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
 **Common Status Byte (returned in most responses):**
 * `0x00`: Success (OK) / `0x01`: File Not Found / Generic Error / `0x02`: Device Busy
 
-#### 1. SD Card Subsystem (PayloadID: `0x00`)
+#### 1. SD Card (PayloadID: `0x00`)
 
-**Request List Files `(PID: 0x00)`**
-*   **Request Data**: `[Empty]`
-*   **Response Data**:
-    *   `[NumFiles (uint8_t)]` -> Count of files
-    *   *Followed by `NumFiles` entries of:* `[FileNameLength (uint8_t)]` + `[FileName (ascii array)]`
+**Request List files (SD) `(PID: 0x00)`**
+*   **Request (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+*   **Response (Dynamic Length):**
+    | Number of files (uint8) | Filename Length | Filename ASCII |
+    | :--- | :--- | :--- |
+    | 1B | 1B | N |
 
-**Request File Info `(PID: 0x01)`**
-*   **Request Data**: `[FileNameLength (uint8_t)]` + `[FileName (ascii array)]`
-*   **Response Data**: `[Status (uint8_t)]` + `[FileSize (uint32_t)]` + `[CreatedTimestamp (uint32_t)]`
+**Request File Info (SD) `(PID: 0x01)`**
+*   **Request (Dynamic Length):**
+    | Filename Length | Filename ASCII |
+    | :--- | :--- |
+    | 1B | N |
+*   **Response (9 bytes):**
+    | Status (0x00 = OK, 0x01 = Error) | File Size (uint32) | Created Timestamp (uint32) |
+    | :--- | :--- | :--- |
+    | 1B | 4B | 4B |
 
 **Request File Data `(PID: 0x02)`**
-*(Split into chunks to abide by KISS MTU constraints)*
-*   **Request Data**: `[NameLen (uint8_t)]` + `[Name (ascii)]` + `[Offset (uint32_t)]` + `[ReadLength (uint16_t)]`
-*   **Response Data**: `[Status (uint8_t)]` + `[Offset (uint32_t)]` + `[ActualDataLength (uint16_t)]` + `[Raw File Bytes]`
+*   **Request (Dynamic Length):**
+    | Filename Length | Filename ASCII | FileOffset (uint32) | ChunkLength (uint16) |
+    | :--- | :--- | :--- | :--- |
+    | 1B | N | 4B | 2B |
+*   **Response (Dynamic Length):**
+    | Status (0x00 = OK, 0x01 = Error) | Echoed FileOffset (uint32) | Echoed ChunkLength (uint16) | Raw file byte of chunk |
+    | :--- | :--- | :--- | :--- |
+    | 1B | 4B | 2B | N |
 
 #### 2. VR Payload / Pi Zero (PayloadID: `0x01`)
 
 **Request Pi Status `(PID: 0x00)`**
-*   **Request Data**: `[Empty]`
-*   **Response Data**: 16-byte fixed structure.
-    *   `[Timestamp (uint32_t)]` -> Unix epoch time on the Pi.
-    *   `[Uptime (uint32_t)]` -> Seconds since boot.
-    *   `[CPULoadPercent (uint8_t)]` -> e.g., 25 for 25%.
-    *   `[CPUTemp (int8_t)]` -> e.g., 45 for 45°C.
-    *   `[RAMUsagePercent (uint8_t)]` -> e.g., 60 for 60%.
-    *   `[DiskUsagePercent (uint8_t)]` -> e.g., 85 for 85%.
-    *   `[CameraStatus (uint8_t)]` -> 0x00=Error, 0x01=Ready, 0x02=Busy capturing.
-    *   *Reserved 3 padding bytes to align to 32 bits.*
+*   **Request (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+*   **Response (16 bytes):**
+    | Timestamp (uint32) | Uptime (uint32) | CPU Load % (uint8) | CPU Temp (signed or un8) | RAM Usage (uint8) | Disk Usage (uint8) | Camera Status (0=Err, 1=Ready, 2=Busy, uint8) | Padding |
+    | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+    | 4B | 4B | 1B | 1B | 1B | 1B | 1B | 3B |
 
 **Request Capture `(PID: 0x01)`**
-*   **Request Data**: `[Empty]`
-*   **Response Data**: `[Status (uint8_t)]` + `[SavedFileNameLength (uint8_t)]` + `[SavedFileName (ascii array)]`
+*   **Request (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+*   **Response (Dynamic Length):**
+    | Status (0x00 = OK, 0x01 = Error) | SavedFileNameLength (uint8) | SavedFileName ASCII |
+    | :--- | :--- | :--- |
+    | 1B | 1B | N |
 
 **Request Copy Image to SD `(PID: 0x02)`**
-*   **Request Data**: `[FileNameLength (uint8_t)]` + `[FileName (ascii array)]`
-*   **Response Data**: `[Status (uint8_t)]`
+*   **Request (Dynamic Length):**
+    | Filename Length | Filename ASCII |
+    | :--- | :--- |
+    | 1B | N |
+*   **Response (1 byte):**
+    | Status (0x00 = OK, 0x01 = Error) |
+    | :--- |
+    | 1B |
 
 
 ## How to run the Emulator
