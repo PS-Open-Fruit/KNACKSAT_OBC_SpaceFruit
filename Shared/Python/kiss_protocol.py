@@ -23,10 +23,36 @@ class KISSProtocol:
     @staticmethod
     def calculate_crc(data: bytes) -> int:
         """
-        Calculates CRC-32 (Standard Ethernet/Zlib).
-        Matches STM32 Hardware CRC default.
+        Calculates CRC32 using the polynomial:
+        X^32 + X^26 + X^23 + X^22 + X^16 + X^12 + X^11 + X^10 + X^8 + X^7 + X^5 + X^4 + X^2 + X + 1
+        Hex: 0x04C11DB7
+
+        Configuration (Matches STM32 Hardware CRC / MPEG-2):
+        - Poly: 0x04C11DB7
+        - Init: 0xFFFFFFFF
+        - RefIn: False (MSB first)
+        - RefOut: False
+        - XorOut: 0
         """
-        return zlib.crc32(data) & 0xFFFFFFFF
+        crc = 0xFFFFFFFF
+        poly = 0x04C11DB7
+
+        for byte in data:
+            # Align byte to the top 8 bits of the register (MSB-first)
+            crc ^= (byte << 24)
+            for _ in range(8):
+                if crc & 0x80000000:
+                    crc = ((crc << 1) ^ poly) & 0xFFFFFFFF
+                else:
+                    crc = (crc << 1) & 0xFFFFFFFF
+
+        return crc
+    # def calculate_crc(data: bytes) -> int:
+    #     """
+    #     Calculates CRC-32 (Standard Ethernet/Zlib).
+    #     Matches STM32 Hardware CRC default.
+    #     """
+    #     return zlib.crc32(data) & 0xFFFFFFFF
 
     @classmethod
     def escape(cls, data: bytes) -> bytes:
