@@ -113,7 +113,7 @@ def main():
     dl_active = False
     dl_filename_bytes = b''
     dl_offset = 0
-    dl_chunk_size = 256
+    dl_chunk_size = 1024
     dl_total_size = 0
     dl_start_time = 0.0
     
