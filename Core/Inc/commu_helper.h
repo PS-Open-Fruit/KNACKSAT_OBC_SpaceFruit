@@ -190,6 +190,30 @@ uint16_t commu_list_file_encode(char files[20][256],uint8_t files_count,uint8_t 
   return output_len;
 }
 
+uint16_t commu_file_downlink_encode(commu_file_data file_data,uint8_t status, uint8_t *content, uint16_t input_len,uint8_t *output_buffer){
+  uint16_t output_len = 0;
+  if (content == NULL){
+    return 0;
+  }
+  output_buffer[output_len] = status;
+  output_len++;
+  output_buffer[output_len] = (file_data.file_offset >> 24) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (file_data.file_offset >> 16) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (file_data.file_offset >> 8) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (file_data.file_offset >> 0) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (file_data.chunk_len >> 8) & 0xFF;
+  output_len++;
+  output_buffer[output_len] = (file_data.chunk_len >> 0) & 0xFF;
+  output_len++;
+  memcpy(&output_buffer[output_len],content,input_len);
+  output_len += input_len;
+  return output_len;
+}
+
 void commu_init(){
   commuSemaphoreHandle = osSemaphoreNew(1,0,&commuSemaphoreAttr);
   uartMutexHandle = osMutexNew(&uartMutex_attributes);

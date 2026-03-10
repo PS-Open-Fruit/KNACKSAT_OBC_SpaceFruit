@@ -92,7 +92,7 @@ DMA_HandleTypeDef hdma_uart5_tx;
 osThreadId_t MainTaskHandle;
 const osThreadAttr_t MainTask_attributes = {
   .name = "MainTask",
-  .stack_size = 4096 * 4,
+  .stack_size = 8192 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for USBTask */
@@ -162,7 +162,10 @@ const osEventFlagsAttr_t epsFlag_attributes = {
   .name = "epsFlag"
 };
 /* USER CODE BEGIN PV */
-#define NO_COMMU_TIMEOUT 100000
+
+#define DOWNLINK_WINDOW_SIZE 5
+
+#define NO_COMMU_TIMEOUT 10000
 #define DATA_POLLING_INTERVAL 1000
 #define BEACON_INTERVAL 10000
 
@@ -172,7 +175,8 @@ const uint32_t COMMU_RX_TIMEOUT = 3000;
 
 #define SYSTEM_STATE_BEACON         0x00000001U
 #define SYSTEM_STATE_DOWNLINK       0x00000002U
-#define SYSTEM_STATE_ALL            0x0FFFFFFFU
+#define SYSTEM_STATE_WAIT_ACK       0x00000004U
+#define SYSTEM_STATE_ALL            0x00FFFFFFU
 
 osEventFlagsId_t systemStateFlagHandle;
 const osEventFlagsAttr_t systemStateFlag_attr = {
@@ -1203,6 +1207,11 @@ void mainTask(void *argument)
   uint32_t local_state;
 
   uint32_t last_commu_timeNow = 0;
+
+  uint8_t downlink_seq_num = 0;
+
+  commu_file_data downlink_file_data;
+
   for(;;)
   {
     local_state = osEventFlagsGet(systemStateFlagHandle);
@@ -1213,7 +1222,7 @@ void mainTask(void *argument)
     uint32_t millis = (ticks * 1000U) / freq;
 
     if (millis - data_polling_timeNow > DATA_POLLING_INTERVAL){
-
+        printf("local state %ld\r\n",local_state);
         sensors_data_ready = 0;
         HAL_StatusTypeDef ret = rv3028c7_read_time(&rtc, &datetime);
         osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
@@ -1290,9 +1299,60 @@ void mainTask(void *argument)
       // printf("\r\n");
     }
 
+    if (local_state & SYSTEM_STATE_DOWNLINK){
+      uint8_t buf_a[2048] = {0};
+      uint8_t buf_b[2048] = {0};
+      uint16_t buf_len = 0;
+      uint8_t status = 0;
+      uint16_t actual_read_len = 0;
+      FATFS FatFS;
+      FRESULT ret;
+      FIL file;
+      ret = f_mount(&FatFS,"",1);
+      if (ret != FR_OK){
+        status = 1;
+      }
+      ret = f_open(&file,downlink_file_data.file_name,FA_READ);
+      if (ret != FR_OK){
+        status = 1;
+      }
+      ret = f_lseek(&file,downlink_file_data.file_offset);
+      if (ret != FR_OK){
+        status = 1;
+      }
+      ret = f_read(&file,buf_a,downlink_file_data.chunk_len,(UINT*)&actual_read_len);
+      if (ret != FR_OK){
+        status = 1;
+      }
+      f_close(&file);
+      ret = f_mount(NULL,"",0);
+      buf_len = commu_file_downlink_encode(downlink_file_data,status,buf_a,actual_read_len,buf_b);
+      if (buf_len == 0){
+        printf("file downlink encode error\r\n");
+      }
+      buf_len = commu_encode(downlink_seq_num,COMMU_PAYLOAD_ID_OBC,PID_OBC_GS_RESPONSE_FILE_DATA,buf_len,buf_b,buf_a,65535);
+      if (buf_len == 0){
+        printf("downlink commu encode error\r\n");
+      }
+      buf_len = KISS_Encode_Custom_Cmd(buf_a,KISS_CMD_DATA_FRAME,buf_len,buf_b);
+      if (buf_len == 0){
+        printf("downlink kiss encode error\r\n");
+      }
+      HAL_UART_Transmit(&COM_UART,buf_b,buf_len,1000);
+      // printf("downlink %d file_name : %s chunk_len : %d, file_offset %ld\r\n",local_state,downlink_file_data.file_name,downlink_file_data.chunk_len,downlink_file_data.file_offset);
+      downlink_seq_num++;
+      last_commu_timeNow = millis;
+      if (downlink_seq_num % DOWNLINK_WINDOW_SIZE == 0){
+        osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_DOWNLINK);
+        osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_WAIT_ACK);
+      }
+    }
+
     if (millis - last_commu_timeNow > NO_COMMU_TIMEOUT){
+      printf("Reset system state\r\n");
       osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_ALL);
       osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_BEACON);
+      downlink_seq_num = 0;
       last_commu_timeNow = millis;
     }
 
@@ -1470,7 +1530,11 @@ void mainTask(void *argument)
                   printf("Decoded return %d\r\n",decode_status);
                   break;
                 }
+                downlink_file_data = requested_file;
                 printf("file_name : %s chunk_len : %d, file_offset %ld\r\n",requested_file.file_name,requested_file.chunk_len,requested_file.file_offset);
+                osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_BEACON);
+                osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_DOWNLINK);
+                last_commu_timeNow = millis;
                 break;
               default:
                 printf("Unknown OBC PID\r\n");
