@@ -1229,11 +1229,11 @@ void mainTask(void *argument)
             eps_state = EPS_DATA_CONSUMED;
             osMutexRelease(sensorsMutexHandle);
         }
-    // if (!sensors_data_ready){
-    //   continue;
-    // }
-    // printf("Temperature : %ld\r\n", _obc_sensors.temp);
-    // printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensors.datetime.year, _obc_sensors.datetime.month, _obc_sensors.datetime.day, _obc_sensors.datetime.hour, _obc_sensors.datetime.min, _obc_sensors.datetime.sec);
+      // if (!sensors_data_ready){
+      //   continue;
+      // }
+      // printf("Temperature : %ld\r\n", _obc_sensors.temp);
+      // printf("20%02d/%02d/%02d %02d:%02d:%02d\r\n", _obc_sensors.datetime.year, _obc_sensors.datetime.month, _obc_sensors.datetime.day, _obc_sensors.datetime.hour, _obc_sensors.datetime.min, _obc_sensors.datetime.sec);
 
       if (local_eps_state == EPS_DATA_OK){
         for (int i = 0; i < EPS_NUM_VI_CHANNEL;i++){
@@ -1345,16 +1345,16 @@ void mainTask(void *argument)
         if (dekissed_len == 0){
           printf("Invalid KISS Frame from COMMU\r\n");
         }
-        commu_header_t commu_got_header;
-        commu_status_t status_commu =  commu_decode_get_header(dekissed_buff,dekissed_len,&commu_got_header);
+        commu_header_t commu_request_header;
+        commu_status_t status_commu =  commu_decode_get_header(dekissed_buff,dekissed_len,&commu_request_header);
         // kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
         
 
-        printf("ret = %d dekissed len %d\r\n",status_commu,dekissed_len);
+        // printf("ret = %d dekissed len %d\r\n",status_commu,dekissed_len);
         if (status_commu == COMMU_VALID_DATA){
-          printf("Valid commu data\r\n");
-          if (commu_got_header.payload_id == COMMU_PAYLOAD_ID_VR){
-            switch (commu_got_header.pid)
+          // printf("Valid commu data\r\n");
+          if (commu_request_header.payload_id == COMMU_PAYLOAD_ID_VR){
+            switch (commu_request_header.pid)
             {
             case PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD:
               osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
@@ -1367,9 +1367,34 @@ void mainTask(void *argument)
               HAL_UART_Transmit_IT(&COM_UART,msg,ack_len);
               break;
             case PID_GS_VR_REQUEST_CAPTURE:
+              printf("GS Requests to Capture\r\n");
+              break;
+            case PID_GS_VR_REQUEST_PI_STATUS:
+              printf("GS Requests PI Status\r\n");
+              break;
+            case PID_GS_VR_REQUEST_PING:
+              printf("GS Requests PI Ping\r\n");
               break;
             default:
+              printf("GS PID that does not exists in the system\r\n");
               break;
+            }
+          }
+          else if (commu_request_header.payload_id == COMMU_PAYLOAD_ID_OBC){
+            switch (commu_request_header.pid){
+              case PID_GS_OBC_REQUEST_PING:
+                printf("GS Ping OBC\r\n");
+                uint8_t response_ping_buf[32] = {0};
+                uint8_t response_ping_len = commu_encode(0,COMMU_PAYLOAD_ID_OBC,PID_OBC_GS_RESPONSE_PING,0,NULL,response_ping_buf,10);
+
+                uint8_t kiss_encoded_res[32] = {0};
+                uint8_t kiss_respond_len = KISS_Encode_Custom_Cmd(response_ping_buf,KISS_CMD_DATA_FRAME,response_ping_len,kiss_encoded_res);
+
+                HAL_StatusTypeDef ret = HAL_UART_Transmit_IT(&COM_UART,kiss_encoded_res,kiss_respond_len);
+                printf("Responsded ping from commu with return %d from UART\r\n",ret);
+                break;
+              default:
+                break;
             }
           }
         }
