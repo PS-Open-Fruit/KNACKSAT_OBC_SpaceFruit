@@ -1393,7 +1393,17 @@ void mainTask(void *argument)
                 HAL_StatusTypeDef ret = HAL_UART_Transmit_IT(&COM_UART,kiss_encoded_res,kiss_respond_len);
                 printf("Responsded ping from commu with return %d from UART\r\n",ret);
                 break;
+              case PID_GS_OBC_REQUEST_LIST_FILE:
+                printf("GS Request List File\r\n");
+                break;
+              case PID_GS_OBC_REQUEST_FILE_INFO:
+                printf("GS Request File info\r\n");
+                break;
+              case PID_GS_OBC_REQUEST_FILE_DATA:
+                printf("GS Request File data\r\n");
+                break;
               default:
+                printf("Knknown OBC PID\r\n");
                 break;
             }
           }
