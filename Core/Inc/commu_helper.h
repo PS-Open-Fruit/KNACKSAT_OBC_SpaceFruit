@@ -8,10 +8,23 @@
 #define BASIC_COMMU_FRAME_LEN 9
 
 typedef enum {
-  PID_OBC_GS_BEACON,
+  COMMU_PAYLOAD_ID_OBC,
+  COMMU_PAYLOAD_ID_VR,
+} commu_payload_payload_id;
+
+typedef enum {
+  PID_GS_VR_REQUEST_PING,
+  PID_GS_VR_REQUEST_PI_STATUS,
+  PID_GS_VR_REQUEST_CAPTURE,
+  PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD,
+} commu_payload_vr_pid;
+
+typedef enum {
   PID_OBC_GS_RESPONSE_PING,
+  PID_OBC_GS_RESPONSE_LIST_FILE,
   PID_OBC_GS_RESPONSE_FILE_INFO,
   PID_OBC_GS_RESPONSE_FILE_DATA,
+  PID_OBC_GS_BEACON,
 } obc_downlink_pid;
 
 typedef enum {
@@ -95,14 +108,16 @@ uint16_t commu_encode(uint8_t seq_num, uint8_t payload_id, uint8_t pid,
 }
 
 commu_status_t commu_decode_get_header(uint8_t *input_buf, uint16_t input_len,commu_header_t *header){
+    /* seq (1) + payload_id (1) + pid (1) + dataLen (2) + crc (4)*/
     if (input_len < BASIC_COMMU_FRAME_LEN){
       return COMMU_ERR_FRAMING;
     }
-    uint32_t crc = KISS_CalculateCRC32(input_buf,input_len - 4);
-    uint32_t crc_in = (input_buf[input_len - 1] >> 24) & 0xFF |
-                      (input_buf[input_len - 2] >> 16) & 0xFF |
-                      (input_buf[input_len - 3] >> 8) & 0xFF |
-                      input_buf[input_len - 4] & 0xFF;
+    uint32_t crc = KISS_CalculateCRC32(input_buf,input_len - 4U);
+    uint32_t crc_in = (((uint32_t)input_buf[input_len - 4] & 0xFF) << 24) |
+                      (((uint32_t)input_buf[input_len - 3] & 0xFF) << 16) |
+                      (((uint32_t)input_buf[input_len - 2] & 0xFF) << 8)  |
+                        (uint32_t)input_buf[input_len - 1] & 0xFF;
+
     if (crc != crc_in){
       return COMMU_ERR_CRC;
     }

@@ -162,7 +162,7 @@ const osEventFlagsAttr_t epsFlag_attributes = {
   .name = "epsFlag"
 };
 /* USER CODE BEGIN PV */
-
+#define NO_COMMU_TIMEOUT 100000
 #define DATA_POLLING_INTERVAL 1000
 #define BEACON_INTERVAL 10000
 
@@ -1072,7 +1072,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     }
     if (huart->Instance == COM_UART.Instance) {
         osMessageQueuePut(communicationUartQueueHandle, &Size, 0, 0);
-        HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
+        // HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
         /* Do NOT re-arm here — let the task do it after copying commu_temp_buff */
     }
 }
@@ -1201,6 +1201,8 @@ void mainTask(void *argument)
 
   uint32_t data_polling_timeNow = 0;
   uint32_t local_state;
+
+  uint32_t last_commu_timeNow = 0;
   for(;;)
   {
     local_state = osEventFlagsGet(systemStateFlagHandle);
@@ -1211,6 +1213,7 @@ void mainTask(void *argument)
     uint32_t millis = (ticks * 1000U) / freq;
 
     if (millis - data_polling_timeNow > DATA_POLLING_INTERVAL){
+
         sensors_data_ready = 0;
         HAL_StatusTypeDef ret = rv3028c7_read_time(&rtc, &datetime);
         osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
@@ -1287,6 +1290,12 @@ void mainTask(void *argument)
       // printf("\r\n");
     }
 
+    if (millis - last_commu_timeNow > NO_COMMU_TIMEOUT){
+      osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_ALL);
+      osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_BEACON);
+      last_commu_timeNow = millis;
+    }
+
     if ((millis - beacon_timeNow > BEACON_INTERVAL) && (local_state & SYSTEM_STATE_BEACON)){
       uint8_t date_time_buf[32] = {0};
       rv3028c7_pack_datetime(&_obc_sensors.datetime,date_time_buf);
@@ -1331,15 +1340,23 @@ void mainTask(void *argument)
         printf("commu ready\r\n");
         memcpy(temp_commu_data_buff,commu_data_buff,commu_size);
         uint16_t buff_size = commu_size;
-        kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
+        uint8_t dekissed_buff[256];
+        kiss_status_t dekissed_len = KISS_Decode(temp_commu_data_buff,buff_size,dekissed_buff);
+        if (dekissed_len == 0){
+          printf("Invalid KISS Frame from COMMU\r\n");
+        }
+        commu_header_t commu_got_header;
+        commu_status_t status_commu =  commu_decode_get_header(dekissed_buff,dekissed_len,&commu_got_header);
+        // kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
         
-        printf("ret = %d\r\n",status_kiss);
-        if (status_kiss == KISS_VALID_DATA){
+
+        printf("ret = %d dekissed len %d\r\n",status_commu,dekissed_len);
+        if (status_commu == COMMU_VALID_DATA){
           printf("Valid commu data\r\n");
-          if (output_frame.payload_id){
-            switch (output_frame.pid)
+          if (commu_got_header.payload_id == COMMU_PAYLOAD_ID_VR){
+            switch (commu_got_header.pid)
             {
-            case KISS_VR_PID_IMAGE_REQUEST:
+            case PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD:
               osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
               printf("Download image command\r\n");
               uint8_t ack_msg[32] = {0x00,0xAC};
@@ -1349,12 +1366,7 @@ void mainTask(void *argument)
               printf("ACK to COMMU\r\n");
               HAL_UART_Transmit_IT(&COM_UART,msg,ack_len);
               break;
-            case KISS_VR_PID_IMAGE_CAPTURE:
-              break;
-            case KISS_VR_PID_IMAGE_DOWNLOAD:
-              break;
-            case KISS_VR_PID_IMAGE_DOWNLOAD_DONE:
-              break;
+            case PID_GS_VR_REQUEST_CAPTURE:
               break;
             default:
               break;
@@ -1729,7 +1741,7 @@ void uartRx(void *argument)
 
         // else if (status == osOK)
         /* --- Re-arm RX immediately so we don't miss the next bytes --- */
-        // HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
+        HAL_UARTEx_ReceiveToIdle_IT(&COM_UART, commu_temp_buff, COMMU_RX_SIZE);
 
         /* --- Overflow guard --- */
         if ((commu_offset + chunk_len) > COMMU_BUF_SIZE)
