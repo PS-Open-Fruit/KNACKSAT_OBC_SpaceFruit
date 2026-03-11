@@ -15,7 +15,7 @@ from beacon_helper import *
 from Shared.Python.kiss_protocol import KISSProtocol
 
 # --- CONFIGURATION ---
-PORT = '/dev/cu.usbserial-A10OMHTZ'  # Change to your virtual or real COM port
+PORT = 'COM4'  # Change to your virtual or real COM port
 BAUD = 9600
 
 
@@ -133,7 +133,7 @@ def main():
     dl_active = False
     dl_filename_bytes = b''
     dl_offset = 0
-    dl_chunk_size = 1024
+    dl_chunk_size = 200
     dl_total_size = 0
     dl_start_time = 0.0
     
@@ -253,7 +253,7 @@ def main():
                                                     dl_start_time = time.time()
                                                     print(f"     [GS] File Size Acquired. Starting transfer of {size} bytes...")
                                                     req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
-                                                    command_queue.put(('MANUAL', 0x00, 0x03, "Auto-Request Chunk", req_data))
+                                                    command_queue.put(('MANUAL', 0x00, 0x03, "Auto-Request File Initial", req_data))
                                                 else:
                                                     print(f"     \033[91m[GS] Target file not found. Auto-download aborted.\033[0m")
                                                     dl_active = False
@@ -264,50 +264,49 @@ def main():
                                             print(f"     Status: {status} | Offset: {offset} | Len: {dl}")
                                             
                                             if status == 0x00 and dl > 0:
-                                                filepath = os.path.join(DOWNLOADS_DIR, current_download_file)
-                                                mode = 'r+b' if os.path.exists(filepath) and offset > 0 else 'wb'
-                                                try:
-                                                    with open(filepath, mode) as f:
-                                                        f.seek(offset)
-                                                        f.write(chunk)
+                                                if offset != dl_offset and dl_active:
+                                                    print(f"     \033[93m[GS] Ignored out-of-sync chunk (Expected: {dl_offset}, Got: {offset})\033[0m")
+                                                else:
+                                                    filepath = os.path.join(DOWNLOADS_DIR, current_download_file)
+                                                    mode = 'r+b' if os.path.exists(filepath) and offset > 0 else 'wb'
+                                                    try:
+                                                        with open(filepath, mode) as f:
+                                                            f.seek(offset)
+                                                            f.write(chunk)
+                                                            
+                                                        # Provide a visual progress indicator instead of basic text
+                                                        if dl_total_size > 0:
+                                                            progress = min(1.0, (offset + dl) / dl_total_size)
+                                                            bar_len = 30
+                                                            filled = int(bar_len * progress)
+                                                            bar = '=' * filled + '-' * (bar_len - filled)
+                                                            
+                                                            elapsed = time.time() - dl_start_time
+                                                            speed = (offset + dl) / elapsed if elapsed > 0 else 0
+                                                            speed_str = f"{speed / 1024:.1f} KB/s" if speed >= 1024 else f"{(speed):.1f} B/s"
+                                                            
+                                                            rem_bytes = dl_total_size - (offset + dl)
+                                                            eta = rem_bytes / speed if speed > 0 else 0
+                                                            
+                                                            print(f"     \033[96m[{bar}] {progress*100:.1f}% ({offset+dl}/{dl_total_size} B) | {speed_str} | ETA: {eta:.1f}s\033[0m")
+                                                        else:
+                                                            print(f"     \033[92m[Saved chunk to {filepath} at offset {offset}]\033[0m")
                                                         
-                                                    # Provide a visual progress indicator instead of basic text
-                                                    if dl_total_size > 0:
-                                                        progress = min(1.0, (offset + dl) / dl_total_size)
-                                                        bar_len = 30
-                                                        filled = int(bar_len * progress)
-                                                        bar = '=' * filled + '-' * (bar_len - filled)
-                                                        
-                                                        elapsed = time.time() - dl_start_time
-                                                        speed = (offset + dl) / elapsed if elapsed > 0 else 0
-                                                        speed_str = f"{speed / 1024:.1f} KB/s" if speed >= 1024 else f"{(speed):.1f} B/s"
-                                                        
-                                                        rem_bytes = dl_total_size - (offset + dl)
-                                                        eta = rem_bytes / speed if speed > 0 else 0
-                                                        
-                                                        print(f"     \033[96m[{bar}] {progress*100:.1f}% ({offset+dl}/{dl_total_size} B) | {speed_str} | ETA: {eta:.1f}s\033[0m")
-                                                    else:
-                                                        print(f"     \033[92m[Saved chunk to {filepath} at offset {offset}]\033[0m")
-                                                    
-                                                    # Automatic sliding window for the next chunk
-                                                    if dl_active and dl == dl_chunk_size:
-                                                        dl_offset += dl_chunk_size
-                                                        retry_count = 0
-                                                        # print(f"     [GS] Auto-Requesting next chunk at offset {dl_offset}...")
-                                                        time.sleep(0.05) # critical delay to let AS-32 hardware buffer clear
-                                                        req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
-                                                        command_queue.put(('MANUAL', 0x00, 0x03, "Auto-Request Chunk", req_data))
-                                                    elif dl_active and dl < dl_chunk_size:
-                                                        elapsed_time = time.time() - dl_start_time
-                                                        avg_speed = dl_total_size / elapsed_time if elapsed_time > 0 and dl_total_size > 0 else 0
-                                                        speed_str = f"{avg_speed / 1024:.1f} KB/s" if avg_speed >= 1024 else f"{avg_speed:.1f} B/s"
-                                                        print(f"     \033[92m[GS] Download Complete! '{current_download_file}' is fully retrieved.\033[0m")
-                                                        print(f"     \033[92m[GS] Total Time: {elapsed_time:.2f}s | Avg Speed: {speed_str}\033[0m")
+                                                        # Automatic sliding window - OBC just streams, GS receives
+                                                        if dl_active and dl == dl_chunk_size:
+                                                            dl_offset += dl_chunk_size
+                                                            retry_count = 0
+                                                        elif dl_active and dl < dl_chunk_size:
+                                                            elapsed_time = time.time() - dl_start_time
+                                                            avg_speed = dl_total_size / elapsed_time if elapsed_time > 0 and dl_total_size > 0 else 0
+                                                            speed_str = f"{avg_speed / 1024:.1f} KB/s" if avg_speed >= 1024 else f"{avg_speed:.1f} B/s"
+                                                            print(f"     \033[92m[GS] Download Complete! '{current_download_file}' is fully retrieved.\033[0m")
+                                                            print(f"     \033[92m[GS] Total Time: {elapsed_time:.2f}s | Avg Speed: {speed_str}\033[0m")
+                                                            dl_active = False
+    
+                                                    except Exception as e:
+                                                        print(f"     \033[91m[Save Error: {e}]\033[0m")
                                                         dl_active = False
-
-                                                except Exception as e:
-                                                    print(f"     \033[91m[Save Error: {e}]\033[0m")
-                                                    dl_active = False
                                             else:
                                                 if dl_active:
                                                     print(f"     \033[93m[GS] End of file reached or error occurred.\033[0m")
