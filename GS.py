@@ -263,6 +263,9 @@ def main():
                                             chunk = data[7:7+dl]
                                             print(f"     Status: {status} | Offset: {offset} | Len: {dl}")
                                             
+                                            if dl_active:
+                                                last_request_time = time.time()
+                                                
                                             if status == 0x00 and dl > 0:
                                                 if offset != dl_offset and dl_active:
                                                     print(f"     \033[93m[GS] Ignored out-of-sync chunk (Expected: {dl_offset}, Got: {offset})\033[0m")
@@ -357,6 +360,7 @@ def main():
                                     ack_frame = KISSProtocol.wrap_frame(ack_payload, command=0xAC)
                                     print(f"  -> TX Raw Frame: {colorize_raw_frame(ack_frame)}")
                                     ser.write(ack_frame)
+                                    packets_received_in_window = 0
                                     
                 rx_buffer = bytearray(FEND_BYTE)
             else:

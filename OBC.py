@@ -317,7 +317,7 @@ def main():
                             # Handle GS ACK (Command 0xAC)
                             elif cmd == 0xAC:
                                 print(f"[OBC] Received ACK for SeqNum up to: {seq}")
-                                if 'downlink_fpath' in locals() and 'downlink_offset' in locals() and 'downlink_chunk_size' in locals():
+                                if 'downlink_fpath' in globals() and 'downlink_offset' in globals() and 'downlink_chunk_size' in globals():
                                     filesize = os.path.getsize(downlink_fpath) if os.path.exists(downlink_fpath) else 0
                                     chunks_to_send = 5
                                     print(f"  -> Resuming file transfer at offset {downlink_offset}...")
