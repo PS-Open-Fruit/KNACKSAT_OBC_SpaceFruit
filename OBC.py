@@ -8,12 +8,17 @@ PI_FILES_DIR = "pi_files"
 os.makedirs(PI_FILES_DIR, exist_ok=True)
 import time
 import random
-
-# Import your custom KISS protocol class
+import sys
 from Shared.Python.kiss_protocol import KISSProtocol
 
 # --- CONFIGURATION ---
-PORT = 'COM5'  # Change to your virtual or real COM port
+_PORTS = {
+    'darwin': '/dev/cu.usbserial-XXXXXXXX',
+    'win32':  'COM5',
+    'linux':  '/dev/ttyUSB0',
+}
+PORT = _PORTS.get(sys.platform, _PORTS['win32'])
+print(f"[OBC] Platform: {sys.platform} -> Using port: {PORT}")
 BAUD = 9600
 
 # --- SUBSYSTEMS ---

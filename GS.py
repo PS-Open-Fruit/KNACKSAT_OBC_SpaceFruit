@@ -8,11 +8,18 @@ current_download_file = None
 import time
 import threading
 import queue
+import sys
 from Shared.Python.beacon_helper import *
 from Shared.Python.kiss_protocol import KISSProtocol
 
 # --- CONFIGURATION ---
-PORT = '/dev/cu.usbserial-A10OMHTZ'  # Change to your virtual or real COM port
+_PORTS = {
+    'darwin': '/dev/cu.usbserial-A10OMHTZ',
+    'win32':  'COM4',
+    'linux':  '/dev/ttyUSB0',
+}
+PORT = _PORTS.get(sys.platform, _PORTS['win32'])
+print(f"[GS] Platform: {sys.platform} -> Using port: {PORT}")
 BAUD = 9600
 
 
