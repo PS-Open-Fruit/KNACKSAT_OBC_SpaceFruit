@@ -1301,6 +1301,7 @@ void mainTask(void *argument)
     }
 
     if (local_state & SYSTEM_STATE_DOWNLINK){
+      HAL_IWDG_Refresh(&hiwdg); // Kick watchdog before slow SD+UART operations
       uint8_t buf_a[2048] = {0};
       uint8_t buf_b[2048] = {0};
       uint16_t buf_len = 0;
@@ -1339,7 +1340,7 @@ void mainTask(void *argument)
       if (buf_len == 0){
         printf("downlink kiss encode error\r\n");
       }
-      HAL_UART_Transmit(&COM_UART,buf_b,buf_len,1000);
+      HAL_UART_Transmit(&COM_UART,buf_b,buf_len,400); // Must be < IWDG timeout (~484ms)
       
       downlink_file_data.file_offset += actual_read_len;
       // printf("downlink %d file_name : %s chunk_len : %d, file_offset %ld\r\n",local_state,downlink_file_data.file_name,downlink_file_data.chunk_len,downlink_file_data.file_offset);
