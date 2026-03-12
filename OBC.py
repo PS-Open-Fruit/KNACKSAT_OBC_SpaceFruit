@@ -219,47 +219,38 @@ def main():
                                         else:
                                             dummy_data = struct.pack('>BII', 0x01, 0, 0)
                                             
-                                    elif pid == 0x03: # File Data (Chunk)
+                                    elif pid == 0x03: # File Data (Chunk) — GS drives each window via a new request
                                         if len(req_data) >= 1:
                                             name_len = req_data[0]
                                             fname = req_data[1:1+name_len].decode('utf-8')
                                             fpath = os.path.join(SD_CARD_DIR, fname)
                                             if len(req_data) >= 1 + name_len + 6:
                                                 offset, r_len = struct.unpack('>IH', req_data[1+name_len : 1+name_len+6])
-                                                
-                                                global downlink_fpath, downlink_offset, downlink_chunk_size
-                                                downlink_fpath = fpath
-                                                downlink_offset = offset
-                                                downlink_chunk_size = r_len
-                                                
-                                                # Send up to 5 chunks in a burst for the sliding window
                                                 filesize = os.path.getsize(fpath) if os.path.exists(fpath) else 0
-                                                chunks_to_send = 5
+                                                print(f"  -> Streaming window: file='{fname}' offset={offset} chunk={r_len} filesize={filesize}")
                                                 
-                                                for _ in range(chunks_to_send):
-                                                    if downlink_offset >= filesize:
+                                                cur_offset = offset
+                                                for _ in range(5):  # DOWNLINK_WINDOW_SIZE = 5
+                                                    if cur_offset >= filesize:
                                                         break
-                                                    
                                                     try:
-                                                        with open(downlink_fpath, 'rb') as f:
-                                                            f.seek(downlink_offset)
-                                                            chunk = f.read(downlink_chunk_size)
-                                                            dummy_data = struct.pack('>BIH', 0x00, downlink_offset, len(chunk)) + chunk
-                                                    except:
-                                                        dummy_data = struct.pack('>BIH', 0x01, downlink_offset, 0)
-                                                        
+                                                        with open(fpath, 'rb') as f:
+                                                            f.seek(cur_offset)
+                                                            chunk = f.read(r_len)
+                                                        chunk_data = struct.pack('>BIH', 0x00, cur_offset, len(chunk)) + chunk
+                                                    except Exception as e:
+                                                        print(f"  -> Read error: {e}")
+                                                        chunk_data = struct.pack('>BIH', 0x01, cur_offset, 0)
                                                     seq_counter = (seq_counter + 1) % 256
-                                                    custom_payload = build_custom_payload(p_id, pid, seq_counter, dummy_data)
+                                                    custom_payload = build_custom_payload(p_id, pid, seq_counter, chunk_data)
                                                     tx_frame = KISSProtocol.wrap_frame(custom_payload, command=0x01)
-                                                    print(f"  -> TX Raw Frame (Window offset {downlink_offset}): {colorize_raw_frame(tx_frame)}")
+                                                    print(f"  -> TX Raw Frame (offset {cur_offset}): {colorize_raw_frame(tx_frame)}")
                                                     ser.write(tx_frame)
-                                                    time.sleep(0.05) # simulate transmit delay and allow buffers to flush
-                                                    
-                                                    downlink_offset += len(chunk)
+                                                    time.sleep(0.05)
+                                                    cur_offset += len(chunk)
                                                     if len(chunk) < r_len:
-                                                        break # EOF reached
-                                                
-                                                RX_handled = True # We already sent the frames manually inside the loop
+                                                        break  # EOF reached
+                                                dummy_data = None  # already sent above
                                             else:
                                                 dummy_data = struct.pack('>BIH', 0x01, 0, 0)
                                         else:
@@ -306,44 +297,14 @@ def main():
                                             dummy_data = struct.pack('>B', 0x01)
                                             
                                         
-                                # Send response (Command 0x01) echoing the p_id and pid
-                                if 'RX_handled' not in locals() or not locals().get('RX_handled'):
+                                # Send response (Command 0x01) for non-streaming commands
+                                if dummy_data is not None:
                                     custom_payload = build_custom_payload(p_id, pid, seq_counter, dummy_data)
                                     tx_frame = KISSProtocol.wrap_frame(custom_payload, command=0x01)
-                                    
                                     print(f"  -> TX Raw Frame: {colorize_raw_frame(tx_frame)}")
                                     ser.write(tx_frame)
                                     
-                            # Handle GS ACK (Command 0xAC)
-                            elif cmd == 0xAC:
-                                print(f"[OBC] Received ACK for SeqNum up to: {seq}")
-                                if 'downlink_fpath' in globals() and 'downlink_offset' in globals() and 'downlink_chunk_size' in globals():
-                                    filesize = os.path.getsize(downlink_fpath) if os.path.exists(downlink_fpath) else 0
-                                    chunks_to_send = 5
-                                    print(f"  -> Resuming file transfer at offset {downlink_offset}...")
-                                    for _ in range(chunks_to_send):
-                                        if downlink_offset >= filesize:
-                                            break
-                                        
-                                        try:
-                                            with open(downlink_fpath, 'rb') as f:
-                                                f.seek(downlink_offset)
-                                                chunk = f.read(downlink_chunk_size)
-                                                dummy_data = struct.pack('>BIH', 0x00, downlink_offset, len(chunk)) + chunk
-                                        except:
-                                            dummy_data = struct.pack('>BIH', 0x01, downlink_offset, 0)
-                                            
-                                        seq_counter = (seq_counter + 1) % 256
-                                        # Use standard OBC_SUBSYSTEM / PID 0x03 for file data
-                                        custom_payload = build_custom_payload(0x00, 0x03, seq_counter, dummy_data)
-                                        tx_frame = KISSProtocol.wrap_frame(custom_payload, command=0x01)
-                                        print(f"  -> TX Raw Frame (Window offset {downlink_offset}): {colorize_raw_frame(tx_frame)}")
-                                        ser.write(tx_frame)
-                                        time.sleep(0.05) # simulate transmit delay and allow buffers to flush
-                                        
-                                        downlink_offset += len(chunk)
-                                        if len(chunk) < downlink_chunk_size:
-                                            break # EOF reached
+                            # ACK (cmd 0xAC) is no longer used — GS drives windows via new requests
                                             
                 # Reset buffer and start with FEND for the next potential frame
                 rx_buffer = bytearray(FEND_BYTE)

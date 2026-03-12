@@ -4,14 +4,11 @@ import os
 
 DOWNLOADS_DIR = "downloads"
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
-current_download_file = "unknown.bin"
+current_download_file = None
 import time
 import threading
 import queue
-import sys
-from beacon_helper import *
-
-# Import your custom KISS protocol class
+from Shared.Python.beacon_helper import *
 from Shared.Python.kiss_protocol import KISSProtocol
 
 # --- CONFIGURATION ---
@@ -124,7 +121,7 @@ def main():
     
     FEND_BYTE = bytes([KISSProtocol.FEND])
     rx_buffer = bytearray()
-    highest_seq_received = -1
+    DOWNLINK_WINDOW_SIZE = 5
     packets_received_in_window = 0
     
     threading.Thread(target=cli_thread, daemon=True).start()
@@ -194,7 +191,6 @@ def main():
             if dl_active:
                 last_request_time = time.time()
             
-            highest_seq_received = -1
             packets_received_in_window = 0
         except queue.Empty:
             if dl_active and last_request_time > 0 and (time.time() - last_request_time > 2.0):
@@ -270,6 +266,8 @@ def main():
                                                 if offset != dl_offset and dl_active:
                                                     print(f"     \033[93m[GS] Ignored out-of-sync chunk (Expected: {dl_offset}, Got: {offset})\033[0m")
                                                 else:
+                                                    if current_download_file is None:
+                                                        continue
                                                     filepath = os.path.join(DOWNLOADS_DIR, current_download_file)
                                                     mode = 'r+b' if os.path.exists(filepath) and offset > 0 else 'wb'
                                                     try:
@@ -358,18 +356,15 @@ def main():
                                 except Exception as e:
                                     print(f"     \033[91mParse Error:\033[0m {e} (Raw: {data.hex()})")
                                 
-                                highest_seq_received = max(highest_seq_received, seq)
                                 packets_received_in_window += 1
                                 
-                                # Send ACK when window is complete
-                                if packets_received_in_window == 5:
-                                    print(f"[GS] Window complete. Sending ACK for SeqNum {highest_seq_received}")
-                                    ack_payload = build_custom_payload(0x00, 0x00, highest_seq_received, b'')
-                                    ack_frame = KISSProtocol.wrap_frame(ack_payload, command=0xAC)
-                                    print(f"  -> TX Raw Frame: {colorize_raw_frame(ack_frame)}")
-                                    ser.write(ack_frame)
+                                # Request next window when current window is complete
+                                if dl_active and packets_received_in_window >= DOWNLINK_WINDOW_SIZE:
                                     packets_received_in_window = 0
-                                    
+                                    req_data = struct.pack('>B', len(dl_filename_bytes)) + dl_filename_bytes + struct.pack('>IH', dl_offset, dl_chunk_size)
+                                    print(f"[GS] Window complete. Requesting next window at offset {dl_offset}")
+                                    command_queue.put(('MANUAL', 0x00, 0x03, "Auto-Request Next Window", req_data))
+
                 rx_buffer = bytearray(FEND_BYTE)
             else:
                 if len(rx_buffer) > 0:
