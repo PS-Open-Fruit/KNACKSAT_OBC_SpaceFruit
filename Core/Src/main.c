@@ -1354,7 +1354,8 @@ void mainTask(void *argument)
       }
       else if (downlink_seq_num % DOWNLINK_WINDOW_SIZE == 0){
         osEventFlagsClear(systemStateFlagHandle,SYSTEM_STATE_ALL);
-        osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_WAIT_ACK);
+        osEventFlagsSet(systemStateFlagHandle,SYSTEM_STATE_BEACON);
+        last_commu_timeNow = millis;
       }
       printf("after update sequence %d flag %ld\r\n",downlink_seq_num,osEventFlagsGet(systemStateFlagHandle));
     }
@@ -1417,13 +1418,13 @@ void mainTask(void *argument)
         uint8_t commu_payload[128] = {0};
         
         // Check for 0xAC (GS ACK) before COMMU decode
-        if (temp_commu_data_buff[1] == 0xAC) {
-            printf("[OBC] Received ACK from GS\r\n");
-            osEventFlagsClear(systemStateFlagHandle, SYSTEM_STATE_WAIT_ACK | SYSTEM_STATE_BEACON);
-            osEventFlagsSet(systemStateFlagHandle, SYSTEM_STATE_DOWNLINK);
-            osMutexRelease(uartMutexHandle);
-            continue; // Skip COMMU decode for ACK
-        }
+        // if (temp_commu_data_buff[1] == 0xAC) {
+        //     printf("[OBC] Received ACK from GS\r\n");
+        //     osEventFlagsClear(systemStateFlagHandle, SYSTEM_STATE_WAIT_ACK | SYSTEM_STATE_BEACON);
+        //     osEventFlagsSet(systemStateFlagHandle, SYSTEM_STATE_DOWNLINK);
+        //     osMutexRelease(uartMutexHandle);
+        //     continue; // Skip COMMU decode for ACK
+        // }
         
         commu_status_t status_commu =  commu_decode(dekissed_buff,dekissed_len,&commu_request_header,commu_payload);
         // kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
