@@ -250,9 +250,9 @@ uint16_t commu_file_downlink_encode(commu_file_data file_data,uint8_t status, ui
   output_len++;
   output_buffer[output_len] = (file_data.file_offset >> 0) & 0xFF;
   output_len++;
-  output_buffer[output_len] = (file_data.chunk_len >> 8) & 0xFF;
+  output_buffer[output_len] = (input_len >> 8) & 0xFF;
   output_len++;
-  output_buffer[output_len] = (file_data.chunk_len >> 0) & 0xFF;
+  output_buffer[output_len] = (input_len >> 0) & 0xFF;
   output_len++;
   memcpy(&output_buffer[output_len],content,input_len);
   output_len += input_len;
