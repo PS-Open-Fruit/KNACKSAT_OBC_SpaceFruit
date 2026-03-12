@@ -99,4 +99,11 @@ py_test/.venv
 # Some users may want to keep the .ioc file tracked
 # to share hardware configuration
 # If you don't want to track it, uncomment the line below
-# *.ioc
+*.ioc
+
+*.jpg
+*.png
+
+# Python cache files
+**/__pycache__/
+*.pyc
