@@ -240,8 +240,6 @@ const osSemaphoreAttr_t sdTxSemaphoreAttr = {
 #define PAYLOAD_FLAG_IMAGE_REQUEST    0x00000004U
 #define PAYLOAD_FLAG_IMAGE_TRANSFER   0x00000008U
 #define PAYLOAD_FLAG_IMAGE_DATA       0x00000010U
-/* 0x9X PIDs are dangerous / irreversible — use a dedicated flag */
-#define PAYLOAD_FLAG_SHUTDOWN         0x00000040U
 
 // usb_data_t usb_buff;
 
@@ -1460,7 +1458,20 @@ void mainTask(void *argument)
               break;
             case PID_GS_VR_REQUEST_SHUTDOWN:
               printf("GS Requests VR Shutdown (DANGEROUS)\r\n");
-              osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_SHUTDOWN);
+              
+              /* 1. Fire shutdown KISS frame to Pi immediately via CDC */
+              uint8_t pi_cmd[32] = {0};
+              uint16_t pi_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR, KISS_VR_PID_SHUTDOWN, NULL, 0, KISS_CMD_DATA, pi_cmd);
+              CDC_Transmit_FS(pi_cmd, pi_len);
+              printf("Shutdown command fired to VR Pi (Fire & Forget)\r\n");
+
+              /* 2. Proxy the ACK back to GS immediately so it doesn't wait */
+              uint8_t gs_ack_payload[32] = {0};
+              // Note: We use COMMU_PAYLOAD_ID_VR (0x01) so GS knows it refers to the Pi
+              uint16_t gs_ack_len = commu_encode(commu_request_header.seq_num, COMMU_PAYLOAD_ID_VR, PID_GS_VR_REQUEST_SHUTDOWN, 0, NULL, gs_ack_payload, 32);
+              uint8_t gs_ack_kiss[64] = {0};
+              uint16_t gs_ack_kiss_len = KISS_Encode_Custom_Cmd(gs_ack_payload, KISS_CMD_DATA_FRAME, gs_ack_len, gs_ack_kiss);
+              HAL_UART_Transmit_IT(&COM_UART, gs_ack_kiss, gs_ack_kiss_len);
               break;
             default:
               printf("GS PID that does not exists in the system\r\n");
@@ -1512,7 +1523,7 @@ void mainTask(void *argument)
                         if (fno.fattrib & AM_DIR) {
                             printf("Dir: %s\r\n", fno.fname);
                         } else {
-                            printf("File: %s (Size: %u)\r\n", fno.fname, fno.fsize);
+                            printf("File: %s (Size: %lu)\r\n", fno.fname, (unsigned long)fno.fsize);
                             strcpy(files_name[file_count],fno.fname);
                             file_count++;
                         }
@@ -1662,18 +1673,8 @@ void mainTask(void *argument)
         uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,NULL,0,KISS_CMD_DATA, cmd_encoded);
         CDC_Transmit_FS(cmd_encoded,req_len);
       }
-      else if (payloadFlag & PAYLOAD_FLAG_SHUTDOWN){
-        osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE | PAYLOAD_FLAG_SHUTDOWN);
-        uint8_t cmd_encoded[32] = {0};
-        uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR, KISS_VR_PID_SHUTDOWN,
-                                          NULL, 0, KISS_CMD_DATA, cmd_encoded);
-        CDC_Transmit_FS(cmd_encoded, req_len);
-        printf("Shutdown command sent to VR Pi (PID=0x90)\r\n");
-      }
     }
-
   }
-  // printf("It exits main task\r\n");
   /* USER CODE END 5 */
 }
 
@@ -1801,13 +1802,7 @@ void usbTask(void *argument)
                     osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
                     payload_commu_state = PAYLOAD_STATE_IDLE;
                 }
-                if (flag & PAYLOAD_FLAG_SHUTDOWN)
-                {
-                    printf("VR Pi acknowledged shutdown\r\n");
-                    osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_SHUTDOWN);
-                    osEventFlagsSet(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
-                    payload_commu_state = PAYLOAD_STATE_IDLE;
-                }
+
                 if (flag & PAYLOAD_FLAG_IMAGE_REQUEST)
                 {
                     printf("Payload acks Image Request\r\n");
