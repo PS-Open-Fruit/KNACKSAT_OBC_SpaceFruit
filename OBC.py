@@ -125,6 +125,8 @@ def main():
     parser = argparse.ArgumentParser(description="OBC Emulator")
     parser.add_argument("--port", type=str, default=DEFAULT_PORT, help=f"Serial port (default: {DEFAULT_PORT})")
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help=f"Baud rate (default: {DEFAULT_BAUD})")
+    parser.add_argument("--beacon", action="store_true", help="Enable autonomous EPS beaconing")
+    parser.add_argument("--interval", type=float, default=5.0, help="Beacon interval in seconds (default: 5.0)")
     args = parser.parse_args()
 
     port = args.port
@@ -138,9 +140,9 @@ def main():
     seq_counter = 0
     
     # --- BEACON CONFIG ---
-    BEACON_ENABLED = False
+    BEACON_ENABLED = args.beacon
     last_beacon_time = time.time()
-    beacon_interval = 5.0  # seconds
+    beacon_interval = args.interval  # seconds
     
     while True:
         # --- BEACON BROADCAST ---
