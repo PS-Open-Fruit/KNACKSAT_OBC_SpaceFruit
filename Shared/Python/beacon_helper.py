@@ -37,7 +37,6 @@ def bcd_to_dec(bcd_val):
     return (bcd_val & 0x0F) + ((bcd_val >> 4) * 10)
 
 def decode_beacon_packet(buffer):
-    print(EPS_BEACON_LEN)
     if len(buffer) < PACKET_SIZE:
         print(f"Buffer too short! Expected {PACKET_SIZE}, got {len(buffer)}")
         return None
