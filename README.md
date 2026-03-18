@@ -31,18 +31,17 @@ Handles standard packet delimiting overhead.
 * **`Command`:** Defines traffic direction natively without looking at payloads.
   * `0x00`: **Request Frame** (GS -> OBC)
   * `0x01`: **Data/Response Frame** (OBC -> GS)
-  * `0xAC`: **ACK Frame** (Acknowledgment windowing)
 
 ### 2. Routing Layer (Custom Header)
-* **`SeqNum`:** Rolling 8-bit counter ensuring sequential delivery.
-* **`PayloadID` (Subsystem Dest/Src):** Serves as an internal router for the OBC.
-  * `0x00`: **OBC native** (SD Card, Core Sensors)
-  * `0x01`: **VR Payload** (Pi Zero 2W)
-* **`PID` (Type):** The specific action requested within the subsystem context.
-  * e.g., For `PayloadID 0x00`, `PID 0x00` means *List SD Files*. For `PayloadID 0x01`, `PID 0x00` means *Get Pi Status*.
-  * **`0x00`–`0x7F`:** Normal / read-only commands.
-  * **`0x90`–`0xFF`:** **Dangerous / irreversible commands** (e.g., shutdown). Reserved range to prevent accidental execution.
-* **`DataLen`:** 16-bit Big-Endian length of the following `Data` field.
+*   **`SeqNum`:** Rolling 8-bit counter ensuring sequential delivery.
+*   **`PayloadID` (Subsystem Dest/Src):** Serves as an internal router for the OBC.
+    *   `0x00`: **OBC native** (SD Card, Core Sensors)
+    *   `0x01`: **VR Payload** (Pi Zero 2W)
+*   **`PID` (Type):** The specific action requested within the subsystem context.
+    *   **`0xAC`**: **ACK Frame** (Acknowledgment windowing).
+    *   **`0x00`–`0x8F`**: Normal / read-only commands.
+    *   **`0x90`–`0xFF`**: **Dangerous / irreversible commands** (e.g., shutdown). Reserved range to prevent accidental execution.
+*   **`DataLen`:** 16-bit Big-Endian length of the following `Data` field.
 
 ### 3. Application Layer (Data Payload)
 Instead of string parsing, Data payloads are strictly packed binary C-structs.
@@ -56,9 +55,45 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
 **Common Status Byte (returned in most responses):**
 * `0x00`: Success (OK) / `0x01`: File Not Found / Generic Error / `0x02`: Device Busy
 
+---
+
+## Command Summary Table
+
+| Command | PayloadID | PID | Flow | Description | Subsystem |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 0x00 | 0x00 | 0x00 | GS -> OBC | Request Ping | OBC |
+| 0x00 | 0x00 | 0x01 | GS -> OBC | Request List files (SD) | OBC |
+| 0x00 | 0x00 | 0x02 | GS -> OBC | Request File Info (SD) | OBC |
+| 0x00 | 0x00 | 0x03 | GS -> OBC | Request File Data (SD) | OBC |
+| 0x00 | 0x00 | 0x04 | *skipped* | *skipped* | OBC |
+| 0x00 | 0x00 | 0x05 | GS -> OBC | Request System Status | OBC |
+| 0x01 | 0x00 | 0x00 | OBC -> GS | Response Ping | OBC |
+| 0x01 | 0x00 | 0x01 | OBC -> GS | Response List files (SD) | OBC |
+| 0x01 | 0x00 | 0x02 | OBC -> GS | Response File Info (SD) | OBC |
+| 0x01 | 0x00 | 0x03 | OBC -> GS | Response File Data (SD) | OBC |
+| 0x01 | 0x00 | 0x04 | OBC -> GS | Beacon | OBC |
+| 0x01 | 0x00 | 0x05 | OBC -> GS | System Status | OBC |
+| 0x01 | 0x00 | 0xAC | OBC -> GS | OBC ACK | OBC |
+| 0x00 | 0x01 | 0x00 | GS -> OBC -> VR | Request Ping | VR Payload |
+| 0x00 | 0x01 | 0x01 | OBC -> VR | Request Pi Status | VR Payload |
+| 0x00 | 0x01 | 0x02 | GS -> OBC -> VR | Request Capture | VR Payload |
+| 0x00 | 0x01 | 0x03 | GS -> OBC | Request Copy Image to SD | VR Payload |
+| 0x00 | 0x01 | 0x04 | GS -> OBC | Request Check Copy | VR Payload |
+| 0x00 | 0x01 | 0x90 | GS -> OBC -> VR | Request Shutdown Pi | VR Payload |
+| 0x01 | 0x01 | 0x00 | VR -> OBC -> GS | Response Ping | VR Payload |
+| 0x01 | 0x01 | 0x01 | VR -> OBC | Response Pi Status | VR Payload |
+| 0x01 | 0x01 | 0x02 | VR -> OBC -> GS | Response Capture | VR Payload |
+| 0x01 | 0x01 | 0x03 | OBC -> GS | Copy Image to SD | VR Payload |
+| 0x01 | 0x01 | 0x04 | OBC -> GS | Response Check Copy | VR Payload |
+| 0x01 | 0x01 | 0x90 | OBC -> GS | Response Shutdown Pi | VR Payload |
+| 0x01 | 0x01 | 0xAC | OBC -> GS | VR ACK | VR Payload |
+
+---
+
 #### 1. SD Card (PayloadID: `0x00`)
 
 **Request Ping `(PID: 0x00)`**
+*   **Flow:** GS -> OBC
 *   **Request (0 byte):**
     | Data |
     | :--- |
@@ -69,6 +104,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | -    |
 
 **Request List files (SD) `(PID: 0x01)`**
+*   **Flow:** GS -> OBC
 *   **Request (0 byte):**
     | Data |
     | :--- |
@@ -79,6 +115,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | 1B | 1B | N |
 
 **Request File Info (SD) `(PID: 0x02)`**
+*   **Flow:** GS -> OBC
 *   **Request (Dynamic Length):**
     | Filename Length | Filename ASCII |
     | :--- | :--- |
@@ -89,6 +126,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | 1B | 4B | 4B |
 
 **Request File Data `(PID: 0x03)`**
+*   **Flow:** GS -> OBC
 *   **Request (Dynamic Length):**
     | Filename Length | Filename ASCII | FileOffset (uint32) | ChunkLength (uint16) |
     | :--- | :--- | :--- | :--- |
@@ -98,9 +136,25 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | :--- | :--- | :--- | :--- |
     | 1B | 4B | 2B | N |
 
+**Request System Status `(PID: 0x05)`**
+*   **Flow:** GS -> OBC
+*   **Request (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+*   **Response (Dynamic Length):**
+    | Uptime (uint32) | CPU Temp (int8) | Heap Free (uint32) |
+    | :--- | :--- | :--- |
+    | 4B | 1B | 4B |
+
+**OBC ACK `(PID: 0xAC)`**
+*   **Flow:** OBC -> GS
+*   **Response (0 byte):** Empty payload frame indicating acknowledgement.
+
 #### 2. VR Payload / Pi Zero (PayloadID: `0x01`)
 
 **Request Ping `(PID: 0x00)`**
+*   **Flow:** GS -> OBC -> VR
 *   **Request (0 byte):**
     | Data |
     | :--- |
@@ -111,6 +165,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | -    |
 
 **Request Pi Status `(PID: 0x01)`**
+*   **Flow:** OBC -> VR
 *   **Request (0 byte):**
     | Data |
     | :--- |
@@ -121,6 +176,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | 4B | 4B | 1B | 1B | 1B | 1B | 1B | 3B |
 
 **Request Capture `(PID: 0x02)`**
+*   **Flow:** GS -> OBC -> VR
 *   **Request (0 byte):**
     | Data |
     | :--- |
@@ -131,6 +187,7 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | 1B | 1B | N |
 
 **Request Copy Image to SD `(PID: 0x03)`**
+*   **Flow:** GS -> OBC
 *   **Request (0 byte):**
     | Data |
     | :--- |
@@ -140,12 +197,28 @@ Instead of string parsing, Data payloads are strictly packed binary C-structs.
     | :--- |
     | 1B |
 
-**Request VR Shutdown `(PID: 0x90)`**
+**VR ACK `(PID: 0xAC)`**
+*   **Flow:** OBC -> GS
+*   **Response (0 byte):** Empty payload frame indicating acknowledgement from VR subsystem.
+
+**Request Check Copy `(PID: 0x04)`**
+*   **Flow:** GS -> OBC
 *   **Request (0 byte):**
     | Data |
     | :--- |
     | -    |
-*   **Response (0 byte):** ACK only — the Pi sends an empty ACK frame then immediately executes `sudo shutdown -h now`. No further response will be received.
+*   **Response (1 byte):**
+    | Status (0x00 = Idle, 0x01 = Copying, 0x02 = Error) |
+    | :--- |
+    | 1B |
+
+**Request VR Shutdown `(PID: 0x90)`**
+*   **Flow:** GS -> OBC -> VR
+*   **Request (0 byte):**
+    | Data |
+    | :--- |
+    | -    |
+*   **Response (0 byte):** ACK only — the Pi sends an empty ACK frame then immediately executes shut down. No further response will be received.
     | Data |
     | :--- |
     | -    |
