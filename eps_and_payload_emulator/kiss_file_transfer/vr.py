@@ -182,7 +182,7 @@ VR_PID_PING                 = 0x00
 VR_PID_GET_IMAGE_CAPTURE    = 0x01
 VR_PID_IMAGE_REQUEST        = 0x02
 VR_PID_IMAGE_DOWNLOAD       = 0x03
-VR_PID_IMAGE_DOWNLOAD_DONE  = 0x05
+VR_PID_IMAGE_DOWNLOAD_DONE  = 0x88
 VR_PID_SHUTDOWN             = 0x90  # 0x9X for dangerous command range
 
 PID_ACK                     = 0xAC
@@ -211,14 +211,13 @@ except FileNotFoundError:
     SERIAL_PORT = '/dev/ttys005'
 
 BAUD_RATE    = 115200
-FILE_TO_SAVE = 'source-img/testimg-1.jpg'
+FILE_TO_SAVE = 'source-img/testimg-0.jpg'
 
 ser: serial.Serial | None = None
 
 transfer_start_time: float = 0.0
 transfer_bytes_sent: int   = 0
 _progress_bar: ProgressBar | None = None
-
 
 # ─────────────────────────────────────────────────────────────
 #  Serial helpers

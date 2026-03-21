@@ -102,7 +102,7 @@ osThreadId_t USBTaskHandle;
 const osThreadAttr_t USBTask_attributes = {
   .name = "USBTask",
   .stack_size = 4096 * 4,
-  .priority = (osPriority_t) osPriorityAboveNormal7,
+  .priority = (osPriority_t) osPriorityRealtime,
 };
 /* Definitions for wdtFeed */
 osThreadId_t wdtFeedHandle;
@@ -190,7 +190,7 @@ typedef enum{
       PAYLOAD_STATE_RX,
 } payload_state;
 
-#define PAYLOAD_RX_TIMEOUT 1000
+#define PAYLOAD_RX_TIMEOUT 3000
 
 
 uint8_t eps_state = EPS_DATA_NO_DATA;
@@ -1691,7 +1691,7 @@ void mainTask(void *argument)
         uint8_t request_content[3] = {0x00,0xFF,0xFF};
         uint16_t req_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR,KISS_VR_PID_IMAGE_REQUEST,request_content,3,KISS_CMD_DATA, cmd_encoded);
         CDC_Transmit_FS(cmd_encoded,req_len);
-        printf("KISS Frame Encoded : ");
+        printf("VR Copy KISS Frame Encoded : ");
         for (int i = 0; i < req_len;i++){
           printf("0x%02X ",cmd_encoded[i]);
         }
@@ -1748,7 +1748,7 @@ void usbTask(void *argument)
           // printf("Queue Trigger %d %d\r\n",status,payload_commu_state);
 
         if (status == osErrorTimeout){
-          if ((payload_commu_state == PAYLOAD_STATE_RX) || (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IMAGE_REQUEST)){
+          if ((payload_commu_state == PAYLOAD_STATE_RX)){
             printf("USB RX Timeout, Reset State...\r\n");
             osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_TRANSFER);
             osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
@@ -1830,7 +1830,7 @@ void usbTask(void *argument)
                   osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_RESPONSE_PING);
                 }
             }
-            if (decoded_payload.pid == KISS_PID_ACK)
+            else if (decoded_payload.pid == KISS_PID_ACK)
             {
                 uint32_t flag = osEventFlagsGet(payloadFlagHandle);
                 printf("payload_event_flag: %08lX\r\n", flag);
