@@ -1226,7 +1226,47 @@ void mainTask(void *argument)
     uint32_t millis = (ticks * 1000U) / freq;
 
     if (millis - data_polling_timeNow > DATA_POLLING_INTERVAL){
-        printf("local state %ld, payload state %ld\r\n",local_state,osEventFlagsGet(payloadFlagHandle));
+        uint32_t local_payload_state = osEventFlagsGet(payloadFlagHandle);
+        // printf("local state %ld, payload state %ld\r\n",local_state,osEventFlagsGet(payloadFlagHandle));
+
+        printf("System state : ");
+        if (local_state & SYSTEM_STATE_BEACON){
+          printf("Beacon\r\n");
+        }
+        if (local_state & SYSTEM_STATE_DOWNLINK){
+          printf("Downlink\r\n");
+        }
+        if (local_state & SYSTEM_STATE_WAIT_ACK){
+          printf("  - Downlink wait for GS ACK\r\n");
+        }
+
+        printf("Payload state : ");
+        if (local_payload_state & PAYLOAD_FLAG_IDLE){
+          printf("IDLE, ");
+        }
+        if (local_payload_state & PAYLOAD_FLAG_POLL_CAPTURE){
+          printf("POLL_CAPTURE, ");
+        }
+        if (local_payload_state & PAYLOAD_FLAG_POLL_STATUS){
+          printf("POLL_STATUS, ");
+        }
+        if (local_payload_state & PAYLOAD_FLAG_IMAGE_REQUEST){
+          printf("IMAGE_REQUEST, ");
+        }
+        if (local_payload_state & PAYLOAD_FLAG_IMAGE_TRANSFER){
+          printf("IMAGE_TRANSFER, ");
+        }
+        if (local_payload_state & PAYLOAD_FLAG_PING){
+          printf("PING, ");
+        }
+        if (local_payload_state & PAYLOAD_FLAG_RESPONSE_PING){
+          printf("RESPONSE_PING, ");
+        }
+        if (local_payload_state & PAYLOAD_FLAG_IMAGE_DATA){
+          printf("IMAGE_DATA, ");
+        }
+        printf("\r\n");
+
         sensors_data_ready = 0;
         HAL_StatusTypeDef ret = rv3028c7_read_time(&rtc, &datetime);
         osStatus_t os_ret = osMutexAcquire(sensorsMutexHandle,300);
@@ -1473,15 +1513,15 @@ void mainTask(void *argument)
                   printf("\033[0;31mVR Ping Timeout sent %d bytes\033[0m\r\n",commu_len);
                   osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_PING);
                   // osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
-                  commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
+                  commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
                 }
                 else{
                   printf("\033[0;32mPayload Response Ping\033[0m\r\n");
-                  commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_VR_GS_RESPONSE_PING,0,NULL,commu_vr_request_payload,64);
+                  commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_VR_GS_RESPONSE_PING,0,NULL,commu_vr_request_payload,64);
                 }
               }
               else{
-                commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
+                commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
               }
               commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
               osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
