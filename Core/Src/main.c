@@ -1441,7 +1441,11 @@ void mainTask(void *argument)
         
         uint8_t beacon_kiss[200];
         uint8_t beacon_kiss_len = KISS_Encode_Custom_Cmd(osi_buf,KISS_CMD_DATA_FRAME,osi_buf_len,beacon_kiss);
-        printf("Broadcast beacon len : %d final len %d\r\n",beacon_content_len,beacon_kiss_len);
+        printf("Broadcast beacon");
+        if (beacon_content_len < 121){
+          printf(",No EPS Response still...");
+        }
+        printf("\r\n");
         
         HAL_UART_Transmit_IT(&COM_UART,beacon_kiss,beacon_kiss_len);
         beacon_content_len = 0;
