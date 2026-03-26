@@ -9,6 +9,13 @@ import re
 import csv
 import random
 
+_PORTS = {
+    'darwin': '/dev/cu.usbserial-A10OMHTZ',
+    'win32':  'COM4',
+    'linux':  '/dev/ttyUSB0',
+}
+DEFAULT_PORT = _PORTS.get(sys.platform, _PORTS['win32'])
+
 def read_output(process, name, logger):
     """Utility to read and print subprocess output."""
     for line in iter(process.stdout.readline, ""):
@@ -32,7 +39,7 @@ CLR_RESET  = "\033[0m"
 
 def main():
     parser = argparse.ArgumentParser(description="Scenario 3B: Image Downlink Aggressive Resume")
-    parser.add_argument("--gs_port", type=str, default="COM4", help="Serial port for GS.py")
+    parser.add_argument("--gs_port", type=str, default=DEFAULT_PORT, help="Serial port for GS.py")
     parser.add_argument("--baud", type=int, default=9600, help="Baud rate")
     parser.add_argument("--kill_interval", type=int, default=15, help="Seconds between GS termination")
     parser.add_argument("--csv", type=str, default="test_telemetry.csv", help="CSV file for telemetry data")

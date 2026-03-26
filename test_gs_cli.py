@@ -5,6 +5,13 @@ import threading
 import argparse
 import os
 
+_PORTS = {
+    'darwin': '/dev/cu.usbserial-A10OMHTZ',
+    'win32':  'COM4',
+    'linux':  '/dev/ttyUSB0',
+}
+DEFAULT_PORT = _PORTS.get(sys.platform, _PORTS['win32'])
+
 def read_output(process, name):
     """Utility to read and print subprocess output."""
     for line in iter(process.stdout.readline, ""):
@@ -13,7 +20,7 @@ def read_output(process, name):
 
 def main():
     parser = argparse.ArgumentParser(description="Automated GS CLI Test (GS Only)")
-    parser.add_argument("--gs_port", type=str, default="COM4", help="Serial port for GS.py")
+    parser.add_argument("--gs_port", type=str, default=DEFAULT_PORT, help="Serial port for GS.py")
     parser.add_argument("--baud", type=int, default=9600, help="Baud rate")
     parser.add_argument("--filename", type=str, default="0.jpg", help="Filename for info/download tests")
     args = parser.parse_args()
