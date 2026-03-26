@@ -243,7 +243,7 @@ const osMessageQueueAttr_t payloadStatueQueue_attributes = {
 
 #define PAYLOAD_FLAG_IDLE             0x00000020U
 #define PAYLOAD_FLAG_POLL_CAPTURE     0x00000001U
-#define PAYLOAD_FLAG_REQUEST_STATUS      0x00000002U
+#define PAYLOAD_FLAG_REQUEST_STATUS   0x00000002U
 #define PAYLOAD_FLAG_RESPONSE_STATUS  0x00000100U
 #define PAYLOAD_FLAG_IMAGE_REQUEST    0x00000004U
 #define PAYLOAD_FLAG_IMAGE_TRANSFER   0x00000008U
@@ -1757,93 +1757,91 @@ void mainTask(void *argument)
               case PID_GS_OBC_REQUEST_SYSTEM_STATUS:
                 uint8_t status_response_data[32] = {0};
                 printf("GS Requests System status\r\n");
-                if (osEventFlagsGet(payloadFlagHandle) & PAYLOAD_FLAG_IDLE){
-                  osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
-                  commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
-                  commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_PI_STATUS,0,NULL,commu_vr_request_payload,64);
-                  commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
-                  CDC_Transmit_FS(commu_content, commu_len);
-                  osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_REQUEST_STATUS);
-                  uint32_t wait_status = osEventFlagsWait(payloadFlagHandle,PAYLOAD_FLAG_RESPONSE_STATUS,osFlagsWaitAll,1000);
-                  if (wait_status == osErrorTimeout){
-                    printf("\033[0;31mVR Status Requests Timeout sent %d bytes\033[0m\r\n",commu_len);
-                    osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_REQUEST_STATUS);
-                    // osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
-                    commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
-                  }
-                  else{
-                    printf("\033[0;32mPayload Response Status Requests\033[0m\r\n");
-                    osRet = osMessageQueueGet(payloadStatueQueueHandle,(void*)status_response_data,NULL,1000);
-                    printf("OS Ret from status message queue %ld\r\n",osRet);
-                    if (osRet == osErrorTimeout){
-                      printf("\033[0;31mVR Status Message Poll Timeout\033[0m\r\n");
-                      osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_REQUEST_STATUS);
-                      commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
-                    }
-                    else if (osRet == osOK){
-                      uint32_t payload_boot_count = 0;
-                      uint32_t reserved_zero = 0; 
-                      uint32_t uptime = 0;
-                      uint8_t  cpu_percent = 0;
-                      uint32_t temp_raw = 0;
-                      uint8_t  ram_percent = 0;
-                      uint8_t  disk_percent = 0;
-                      uint8_t  cam_status = 0;
-                      if (osRet == osOK){
-                        // 2. Unpack based on the exact byte offsets from ">IIIBIBBB"
-                        payload_boot_count    = unpack_be32(status_response_data + 0);  // I (4 bytes)
-                        reserved_zero = unpack_be32(status_response_data + 4);  // I (4 bytes)
-                        uptime        = unpack_be32(status_response_data + 8);  // I (4 bytes)
-                        
-                        cpu_percent   = status_response_data[12];               // B (1 byte)
-                        
-                        temp_raw      = unpack_be32(status_response_data + 13); // I (4 bytes)
-                        
-                        ram_percent   = status_response_data[17];               // B (1 byte)
-                        disk_percent  = status_response_data[18];               // B (1 byte)
-                        cam_status    = status_response_data[19];               // B (1 byte)
-        
-                        // 3. Print out the unpacked variables
-                        printf("--- Unpacked Status Data ---\r\n");
-                        printf("Boot Count   : %u\r\n", payload_boot_count);
-                        printf("Timestamp    : %u\r\n", reserved_zero);
-                        printf("Uptime       : %u seconds\r\n", uptime);
-                        printf("CPU Percent  : %u%%\r\n", cpu_percent);
-                        printf("Temp Raw     : %u\r\n", temp_raw);
-                        printf("RAM Percent  : %u%%\r\n", ram_percent);
-                        printf("Disk Percent : %u%%\r\n", disk_percent);
-                        printf("Camera Status: %u\r\n", cam_status);
-                      }
-
-                      int err = lfs_mount(&lfs, &cfg);
-                      if (err)
-                      {
-                        printf("lfs mount error\r\n");
-                        lfs_format(&lfs, &cfg);
-                        lfs_mount(&lfs, &cfg);
-                      }
-                      uint32_t boot_count = 0;
-                      lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDONLY);
-                      lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
-                      lfs_file_close(&lfs, &file);
-                      lfs_unmount(&lfs);
-                      printf("obc boot_count: %ld\r\n", boot_count);
-
-                      uint8_t usb_status = 0;
-                      if (osEventFlagsGet(payloadFlagHandle) & (PAYLOAD_FLAG_IMAGE_REQUEST | PAYLOAD_FLAG_IMAGE_DATA | PAYLOAD_FLAG_RESPONSE_PING | PAYLOAD_FLAG_REQUEST_STATUS)){
-                        usb_status = 1;
-                      }
-                      uint8_t eps_status = 0;
-                      commu_vr_request_len = commu_system_status_raw_downlink_encode(boot_count,usb_status,eps_status,status_response_data,20,commu_vr_request_payload);
-                      commu_len = commu_encode(0,COMMU_PAYLOAD_ID_OBC,PID_GS_OBC_REQUEST_SYSTEM_STATUS,commu_vr_request_len,commu_vr_request_payload,status_response_data,256);
-                      commu_len = KISS_Encode_Custom_Cmd(status_response_data,KISS_CMD_DATA_FRAME,commu_len,commu_content);
-                    }
-                  }
-                }
-                else{
+                osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+                commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+                commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_PI_STATUS,0,NULL,commu_vr_request_payload,64);
+                commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
+                CDC_Transmit_FS(commu_content, commu_len);
+                osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_REQUEST_STATUS);
+                uint32_t wait_status = osEventFlagsWait(payloadFlagHandle,PAYLOAD_FLAG_RESPONSE_STATUS,osFlagsWaitAll,1000);
+                if (wait_status == osErrorTimeout){
+                  printf("\033[0;31mVR Status Requests Timeout sent %d bytes\033[0m\r\n",commu_len);
+                  osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_REQUEST_STATUS);
+                  // osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
                   commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
                 }
-                osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+                else{
+                  printf("\033[0;32mPayload Response Status Requests\033[0m\r\n");
+                  osRet = osMessageQueueGet(payloadStatueQueueHandle,(void*)status_response_data,NULL,1000);
+                  printf("OS Ret from status message queue %ld\r\n",osRet);
+                  if (osRet == osErrorTimeout){
+                    printf("\033[0;31mVR Status Message Poll Timeout\033[0m\r\n");
+                    osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_REQUEST_STATUS);
+                    commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
+                  }
+                  else if (osRet == osOK){
+                    uint32_t payload_boot_count = 0;
+                    uint32_t reserved_zero = 0; 
+                    uint32_t uptime = 0;
+                    uint8_t  cpu_percent = 0;
+                    uint32_t temp_raw = 0;
+                    uint8_t  ram_percent = 0;
+                    uint8_t  disk_percent = 0;
+                    uint8_t  cam_status = 0;
+                    if (osRet == osOK){
+                      // 2. Unpack based on the exact byte offsets from ">IIIBIBBB"
+                      payload_boot_count    = unpack_be32(status_response_data + 0);  // I (4 bytes)
+                      reserved_zero = unpack_be32(status_response_data + 4);  // I (4 bytes)
+                      uptime        = unpack_be32(status_response_data + 8);  // I (4 bytes)
+                      
+                      cpu_percent   = status_response_data[12];               // B (1 byte)
+                      
+                      temp_raw      = unpack_be32(status_response_data + 13); // I (4 bytes)
+                      
+                      ram_percent   = status_response_data[17];               // B (1 byte)
+                      disk_percent  = status_response_data[18];               // B (1 byte)
+                      cam_status    = status_response_data[19];               // B (1 byte)
+      
+                      // 3. Print out the unpacked variables
+                      printf("--- Unpacked Status Data ---\r\n");
+                      printf("Boot Count   : %u\r\n", payload_boot_count);
+                      printf("Timestamp    : %u\r\n", reserved_zero);
+                      printf("Uptime       : %u seconds\r\n", uptime);
+                      printf("CPU Percent  : %u%%\r\n", cpu_percent);
+                      printf("Temp Raw     : %u\r\n", temp_raw);
+                      printf("RAM Percent  : %u%%\r\n", ram_percent);
+                      printf("Disk Percent : %u%%\r\n", disk_percent);
+                      printf("Camera Status: %u\r\n", cam_status);
+                    }
+
+                    int err = lfs_mount(&lfs, &cfg);
+                    if (err)
+                    {
+                      printf("lfs mount error\r\n");
+                      lfs_format(&lfs, &cfg);
+                      lfs_mount(&lfs, &cfg);
+                    }
+                    uint32_t boot_count = 0;
+                    lfs_file_open(&lfs, &file, "boot_count", LFS_O_RDONLY);
+                    lfs_file_read(&lfs, &file, &boot_count, sizeof(boot_count));
+                    lfs_file_close(&lfs, &file);
+                    lfs_unmount(&lfs);
+                    printf("obc boot_count: %ld\r\n", boot_count);
+
+                    uint8_t usb_status = 0;
+                    if (osEventFlagsGet(payloadFlagHandle) & (~PAYLOAD_FLAG_IDLE)){
+                      usb_status = 1;
+                    }
+                    printf("USB Status %ld\r\n",osEventFlagsGet(payloadFlagHandle));
+                    uint8_t eps_status = 0;
+                    commu_vr_request_len = commu_system_status_raw_downlink_encode(boot_count,usb_status,eps_status,status_response_data,20,commu_vr_request_payload);
+                    commu_len = commu_encode(0,COMMU_PAYLOAD_ID_OBC,PID_GS_OBC_REQUEST_SYSTEM_STATUS,commu_vr_request_len,commu_vr_request_payload,status_response_data,256);
+                    commu_len = KISS_Encode_Custom_Cmd(status_response_data,KISS_CMD_DATA_FRAME,commu_len,commu_content);
+                  }
+                }
+                if (!(osEventFlagsGet(payloadFlagHandle) & (~PAYLOAD_FLAG_IDLE))){
+                  osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
+                }
                 HAL_UART_Transmit_IT(&COM_UART, commu_content, commu_len);
                 break;
               default:
