@@ -386,7 +386,7 @@ def getCaptureRequest():
 
         pid = frame['pid']
 
-        Log.info(f"Received PID : {pid}",)
+        # Log.info(f"Received PID : {pid}",)
 
         # ── STATUS POLL ───────────────────────────────────────
         # if pid == VR_PID_GET_STATUS:

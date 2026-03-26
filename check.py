@@ -4,9 +4,10 @@ destContent : str
 print("\033c")
 
 while True:
-    with open("downloads/0.jpg","rb") as source:
+    with open("eps_and_payload_emulator/kiss_file_transfer/source-img/testimg-2.jpg","rb") as source:
+    # with open("file.txt","rb") as source:
         sourceContent = source.read()
-    with open("downloads/testimg-1.jpg" , "rb") as dst:
+    with open("downloads/0.jpg" , "rb") as dst:
         destContent = dst.read()
     print(f"Simple check ,Size (SRC) : {len(sourceContent)}, (DST) : {len(destContent)} , (MATCH?) : {len(sourceContent) == len(destContent)}")
     fail = len(sourceContent) != len(destContent)
@@ -24,5 +25,3 @@ while True:
     else:
         print("Check Failed")
         break
-
-# for i in sourceContent:
