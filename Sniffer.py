@@ -345,7 +345,7 @@ def main():
     print(f"\033[1;36m--- SpaceFruit Traffic Sniffer Started ---\033[0m")
     print(f"Monitoring {args.port} at {args.baud} baud...")
     print(f"Press Ctrl+C to stop.\n")
-    print("\033[90mLegend: FEND CMD SEQ PL_ID PID LEN DATA CRC FEND\033[0m\n")
+    print(f"\033[90mLegend:\033[0m \033[90mFEND\033[0m \033[95mCMD\033[0m \033[94mSEQ\033[0m \033[93mPL_ID\033[0m \033[96mPID\033[0m \033[92mLEN\033[0m \033[97mDATA\033[0m \033[91mCRC\033[0m \033[90mFEND\033[0m\n")
 
     FEND_BYTE = bytes([KISSProtocol.FEND])
     rx_buffer = bytearray()
