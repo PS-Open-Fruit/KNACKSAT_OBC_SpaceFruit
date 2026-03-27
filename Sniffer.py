@@ -226,7 +226,7 @@ def decode_layer3_data(cmd, p_id, pid, data: bytes):
                 lines.append("Beacon decoded below:")
 
             elif pid == 0x05:  # System status
-                fmt = '>IBBIIIBiIIBBBB'
+                fmt = '>IBBIIIBiBBB'
                 expected = struct.calcsize(fmt)
                 if len(data) != expected:
                     lines.append(f"Decode warning: SystemStatus needs {expected}B, got {len(data)}B")
@@ -243,9 +243,6 @@ def decode_layer3_data(cmd, p_id, pid, data: bytes):
                         payload_ram_mb,
                         payload_disk_mb,
                         payload_camera_status,
-                        payload_throttled,
-                        payload_file_count,
-                        payload_load_avg,
                     ) = struct.unpack(fmt, data)
 
                     usb_str = "OK" if usb_bus_status == 0x00 else "Busy"
@@ -254,10 +251,10 @@ def decode_layer3_data(cmd, p_id, pid, data: bytes):
                     lines.append(f"OBC Boot: {obc_boot_count} | USB: {usb_str} ({usb_bus_status}) | EPS: {eps_str} ({eps_status})")
                     lines.append(f"Payload Boot: {payload_boot_count} | Time: {payload_timestamp} | Uptime: {payload_uptime}s")
                     lines.append(
-                        f"CPU: {payload_cpu_load}% ({payload_cpu_temp_milli/1000.0:.3f}C) | RAM: {payload_ram_mb}MB | Disk: {payload_disk_mb}MB"
+                        f"CPU: {payload_cpu_load}% ({payload_cpu_temp_milli/1000.0:.3f}C) | RAM: {payload_ram_mb}% | Disk: {payload_disk_mb}%"
                     )
                     lines.append(
-                        f"CAM: {cam_str} ({payload_camera_status}) | Throttled: {payload_throttled} | Files: {payload_file_count} | LoadAvg: {payload_load_avg}"
+                        f"CAM: {cam_str} ({payload_camera_status})"
                     )
 
             elif pid == 0xAC:
