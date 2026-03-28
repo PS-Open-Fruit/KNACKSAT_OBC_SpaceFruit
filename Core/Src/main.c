@@ -1510,7 +1510,7 @@ void mainTask(void *argument)
               printf("ACK to COMMU\r\n");
               osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_REQUEST);
               osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
-              uint8_t file_req_data[] = {0x00, 0xFF, 0xFF}; /* File ID (1), Chunk ID (2)*/
+              uint8_t file_req_data[] = {0x01, 0xFF, 0xFF}; /* File ID (1), Chunk ID (2)*/
               commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD,3,file_req_data,commu_vr_request_payload,64);
               commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
               CDC_Transmit_FS(commu_content, commu_len);
