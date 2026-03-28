@@ -107,3 +107,8 @@ py_test/.venv
 # Python cache files
 **/__pycache__/
 *.pyc
+
+# Test output files
+downlink_stress_tests/
+test_kills.csv
+test_telemetry.csv
