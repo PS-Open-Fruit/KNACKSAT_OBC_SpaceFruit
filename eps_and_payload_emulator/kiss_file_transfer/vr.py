@@ -457,6 +457,8 @@ def getCaptureRequest():
         # ── CAPTURE COMMAND ───────────────────────────────────
         elif pid == VR_PID_GET_IMAGE_CAPTURE:
             Log.cmd("CAPTURE command received")
+            gs_proc = subprocess.Popen([sys.executable, "-u", "capturepicture.py"], 
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             reply = KISS.wrap_frame(PAYLOAD_ID_VR, PID_ACK, b'')
             send_data(reply)
             Log.ok("ACK sent for CAPTURE")
