@@ -25,7 +25,7 @@ def main():
     # 1. Setup Argument Parser
     parser = argparse.ArgumentParser(description="Capture an image using fswebcam.")
     
-    parser.add_argument("-o", "--output", type=str, default="source-img/testimg-1.jpg", help="Output filename (default: timestamped)")
+    parser.add_argument("-o", "--output", type=str, default="/home/bipoe/payload_emulator/source-img/testimg-1.jpg", help="Output filename (default: timestamped)")
     parser.add_argument("-r", "--resolution", type=str, default="640*480", help="Resolution (default: 1280x720)")
     parser.add_argument("-d", "--device", type=str, default="/dev/video0", help="Camera device (default: /dev/video0)")
     parser.add_argument("-s", "--skip", type=int, default=20, help="Frames to skip for exposure (default: 20)")
