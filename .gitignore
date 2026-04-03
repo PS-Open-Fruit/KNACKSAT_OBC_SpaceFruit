@@ -93,11 +93,13 @@ build/
 .log
 *~
 
+py_test/.venv
+
 # CubeMX temporary files
 # Some users may want to keep the .ioc file tracked
 # to share hardware configuration
 # If you don't want to track it, uncomment the line below
-# *.ioc
+*.ioc
 
 *.jpg
 *.png
@@ -105,3 +107,11 @@ build/
 # Python cache files
 **/__pycache__/
 *.pyc
+
+# Test output files
+downlink_stress_tests/
+test_kills.csv
+test_telemetry.csv
+
+*.DS_Store
+.DS_Store
