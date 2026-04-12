@@ -115,3 +115,5 @@ test_telemetry.csv
 
 *.DS_Store
 .DS_Store
+
+downlink_stress_tests/*
