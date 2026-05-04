@@ -1,4 +1,4 @@
-ELF=build/hardware-test.elf && \
+ELF=build/spacefruit-obc.elf && \
 make && \
 openocd -f interface/stlink.cfg -f target/stm32l4x.cfg \
   -c "program $ELF verify reset exit" && \

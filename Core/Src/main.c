@@ -335,7 +335,7 @@ int main(void)
 
   // rv3028c7_set_hour(&rtc,8);
   payload_kiss.content = kiss_buffer;
-
+  HAL_GPIO_WritePin(SD_MUX_GPIO_Port, SD_MUX_Pin, GPIO_PIN_SET);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -1232,6 +1232,14 @@ void mainTask(void *argument)
 
   commu_file_data downlink_file_data;
   uint32_t payload_flag_store = 0;
+
+  FATFS fs;
+  // FIL file;
+  FRESULT res = f_mount(&fs, "", 0);
+  if (res != FR_OK) {
+    printf("Failed to mount filesystem: %d\r\n", res);
+  }
+  f_mount(NULL, "", 0); // Unmount after checking
 
   for(;;)
   {
