@@ -117,3 +117,5 @@ test_telemetry.csv
 .DS_Store
 
 downlink_stress_tests/*
+cmd_output/
+tests_for_ri2c/
