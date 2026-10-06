@@ -307,7 +307,7 @@ def main():
                                         eps_status = 0x00      # 0x00 = OK, 0x01 = No Response
 
                                         dummy_data = struct.pack(
-                                            '>IBBIIIBiIIBBBB',
+                                            '>IBBIIIBIBBB',
                                             obc_boot_count,
                                             usb_bus_status,
                                             eps_status,
@@ -316,12 +316,9 @@ def main():
                                             pi_status["uptime"],
                                             pi_status["cpu_load"],
                                             pi_status["cpu_temp_milli"],
-                                            pi_status["ram_usage_mb"],
-                                            pi_status["disk_usage_mb"],
+                                            60, # dummy ram percent
+                                            30, # dummy disk percent
                                             pi_status["camera_status"],
-                                            pi_status["throttled"],
-                                            pi_status["file_count"],
-                                            pi_status["load_avg"],
                                         )
 
                                 elif p_id == VR_SUBSYSTEM:
@@ -329,19 +326,32 @@ def main():
                                         dummy_data = b''
                                         
                                     elif pid == 0x01: # Pi Status
-                                        dummy_data = struct.pack('>IIBbBBB3x',
+                                        dummy_data = struct.pack('>IIIBIBBB',
+                                            3,          # Boot Count (uint32)
                                             1772722800, # Timestamp (uint32)
                                             3600,       # Uptime seconds (uint32)
                                             15,         # CPULoadPercent (uint8)
-                                            45,         # CPUTemp (int8)
+                                            45250,      # CPUTemp (uint32)
                                             60,         # RAMUsagePercent (uint8)
                                             30,         # DiskUsagePercent (uint8)
                                             0x01        # CameraStatus: Ready (uint8)
                                         )
                                         
                                     elif pid == 0x02: # Capture
-                                        filename = b"image_02.jpg"
-                                        dummy_data = struct.pack('>BB', 0x00, len(filename)) + filename
+                                        dummy_data = struct.pack('>BB', 0x00, 0x00)
+                                        custom_payload = build_custom_payload(p_id, pid, seq_counter, dummy_data)
+                                        tx_frame = KISSProtocol.wrap_frame(custom_payload, command=0x01)
+                                        print(f"  -> TX Raw Frame (Capture Ack 1): {colorize_raw_frame(tx_frame)}")
+                                        ser.write(tx_frame)
+                                        
+                                        def send_delayed():
+                                            time.sleep(2.0)
+                                            print(f"\n  -> TX Raw Frame (Capture Ack 2 Delayed): {colorize_raw_frame(tx_frame)}")
+                                            ser.write(tx_frame)
+                                        import threading
+                                        threading.Thread(target=send_delayed, daemon=True).start()
+                                        
+                                        dummy_data = None # Prevent the generic send at the bottom from sending a third one
                                         
                                     elif pid == 0x03: # Copy Image to SD
                                         filename = b"all_files"
