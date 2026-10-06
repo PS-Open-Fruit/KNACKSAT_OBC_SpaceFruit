@@ -77,8 +77,6 @@ IWDG_HandleTypeDef hiwdg;
 
 RTC_HandleTypeDef hrtc;
 
-SD_HandleTypeDef hsd1;
-
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 DMA_HandleTypeDef hdma_spi1_rx;
@@ -87,6 +85,7 @@ DMA_HandleTypeDef hdma_spi2_rx;
 DMA_HandleTypeDef hdma_spi2_tx;
 
 UART_HandleTypeDef huart4;
+UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
@@ -259,7 +258,6 @@ const osMessageQueueAttr_t payloadStatueQueue_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void PeriphCommonClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_SPI1_Init(void);
@@ -273,7 +271,7 @@ static void MX_I2C4_Init(void);
 static void MX_CRC_Init(void);
 static void MX_IWDG_Init(void);
 static void MX_RTC_Init(void);
-static void MX_SDMMC1_SD_Init(void);
+static void MX_UART5_Init(void);
 void mainTask(void *argument);
 void usbTask(void *argument);
 void wdtFeedTask(void *argument);
@@ -313,9 +311,6 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 
-  /* Configure the peripherals common clocks */
-  PeriphCommonClock_Config();
-
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
@@ -335,7 +330,7 @@ int main(void)
   MX_IWDG_Init();
   MX_FATFS_Init();
   MX_RTC_Init();
-  MX_SDMMC1_SD_Init();
+  MX_UART5_Init();
   /* USER CODE BEGIN 2 */
   commu_init();
   eps_init();
@@ -475,32 +470,6 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-}
-
-/**
-  * @brief Peripherals Common Clock Configuration
-  * @retval None
-  */
-void PeriphCommonClock_Config(void)
-{
-  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
-
-  /** Initializes the peripherals clock
-  */
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USB|RCC_PERIPHCLK_SDMMC1;
-  PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLLSAI1;
-  PeriphClkInit.Sdmmc1ClockSelection = RCC_SDMMC1CLKSOURCE_PLLSAI1;
-  PeriphClkInit.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_HSE;
-  PeriphClkInit.PLLSAI1.PLLSAI1M = 1;
-  PeriphClkInit.PLLSAI1.PLLSAI1N = 12;
-  PeriphClkInit.PLLSAI1.PLLSAI1P = RCC_PLLP_DIV2;
-  PeriphClkInit.PLLSAI1.PLLSAI1Q = RCC_PLLQ_DIV4;
-  PeriphClkInit.PLLSAI1.PLLSAI1R = RCC_PLLR_DIV2;
-  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_48M2CLK;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
@@ -716,42 +685,6 @@ static void MX_RTC_Init(void)
 }
 
 /**
-  * @brief SDMMC1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SDMMC1_SD_Init(void)
-{
-
-  /* USER CODE BEGIN SDMMC1_Init 0 */
-
-  /* USER CODE END SDMMC1_Init 0 */
-
-  /* USER CODE BEGIN SDMMC1_Init 1 */
-
-  /* USER CODE END SDMMC1_Init 1 */
-  hsd1.Instance = SDMMC1;
-  hsd1.Init.ClockEdge = SDMMC_CLOCK_EDGE_RISING;
-  hsd1.Init.ClockBypass = SDMMC_CLOCK_BYPASS_DISABLE;
-  hsd1.Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_DISABLE;
-  hsd1.Init.BusWide = SDMMC_BUS_WIDE_4B;
-  hsd1.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
-  hsd1.Init.ClockDiv = 0;
-  if (HAL_SD_Init(&hsd1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_SD_ConfigWideBusOperation(&hsd1, SDMMC_BUS_WIDE_4B) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SDMMC1_Init 2 */
-
-  /* USER CODE END SDMMC1_Init 2 */
-
-}
-
-/**
   * @brief SPI1 Initialization Function
   * @param None
   * @retval None
@@ -863,6 +796,41 @@ static void MX_UART4_Init(void)
   /* USER CODE BEGIN UART4_Init 2 */
 
   /* USER CODE END UART4_Init 2 */
+
+}
+
+/**
+  * @brief UART5 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_UART5_Init(void)
+{
+
+  /* USER CODE BEGIN UART5_Init 0 */
+
+  /* USER CODE END UART5_Init 0 */
+
+  /* USER CODE BEGIN UART5_Init 1 */
+
+  /* USER CODE END UART5_Init 1 */
+  huart5.Instance = UART5;
+  huart5.Init.BaudRate = 230400;
+  huart5.Init.WordLength = UART_WORDLENGTH_8B;
+  huart5.Init.StopBits = UART_STOPBITS_1;
+  huart5.Init.Parity = UART_PARITY_NONE;
+  huart5.Init.Mode = UART_MODE_TX_RX;
+  huart5.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart5.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart5.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart5.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart5) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN UART5_Init 2 */
+
+  /* USER CODE END UART5_Init 2 */
 
 }
 
@@ -2319,7 +2287,7 @@ void logTask(void *argument)
   {
     osMessageQueueGet(printQueueHandle,&ch,NULL,osWaitForever);
     // HAL_UART_Transmit_IT(&huart3, (uint8_t *)&ch, 1);
-    HAL_UART_Transmit(&huart3, (uint8_t *)&ch, 1, 0xFFFF);
+    HAL_UART_Transmit(&huart5, (uint8_t *)&ch, 1, 0xFFFF);
     // osDelay(1);
   }
   /* USER CODE END logTask */
