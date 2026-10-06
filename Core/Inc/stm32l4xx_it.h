@@ -61,8 +61,6 @@ void SPI1_IRQHandler(void);
 void SPI2_IRQHandler(void);
 void USART2_IRQHandler(void);
 void UART4_IRQHandler(void);
-void UART5_IRQHandler(void);
-void DMA2_Channel1_IRQHandler(void);
 void DMA2_Channel5_IRQHandler(void);
 void OTG_FS_IRQHandler(void);
 /* USER CODE BEGIN EFP */

@@ -84,14 +84,10 @@ void Error_Handler(void);
 #define SD_MOSI_GPIO_Port GPIOG
 #define SD_CS_Pin GPIO_PIN_5
 #define SD_CS_GPIO_Port GPIOG
-#define DBG_TX_Pin GPIO_PIN_12
-#define DBG_TX_GPIO_Port GPIOC
 #define NOR_RST_Pin GPIO_PIN_0
 #define NOR_RST_GPIO_Port GPIOD
 #define NOR_SCK_Pin GPIO_PIN_1
 #define NOR_SCK_GPIO_Port GPIOD
-#define DBG_RX_Pin GPIO_PIN_2
-#define DBG_RX_GPIO_Port GPIOD
 #define NOR_MISO_Pin GPIO_PIN_3
 #define NOR_MISO_GPIO_Port GPIOD
 #define NOR_MOSI_Pin GPIO_PIN_4
