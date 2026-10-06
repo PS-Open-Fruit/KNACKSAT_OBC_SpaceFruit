@@ -147,7 +147,7 @@ def tcp_server_thread(port):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        server.bind(('127.0.0.1', port))
+        server.bind(('0.0.0.0', port))
         server.listen(5)
         print(f"[TCP] Core Server listening on port {port}")
         while True:
