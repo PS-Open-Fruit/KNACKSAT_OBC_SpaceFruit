@@ -9,6 +9,7 @@ import time
 import threading
 import queue
 import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from Shared.Python.beacon_helper import *
 from Shared.Python.kiss_protocol import KISSProtocol
 

@@ -9,6 +9,7 @@ os.makedirs(PI_FILES_DIR, exist_ok=True)
 import time
 import random
 import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from Shared.Python.kiss_protocol import KISSProtocol
 
 import argparse

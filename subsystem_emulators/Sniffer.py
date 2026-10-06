@@ -4,6 +4,11 @@ import sys
 import argparse
 from datetime import datetime
 
+import os
+
+# Resolve imports from parent directory
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # Import Shared project components
 from Shared.Python.beacon_helper import *
 from Shared.Python.kiss_protocol import KISSProtocol
