@@ -4,6 +4,11 @@ import json
 import sys
 import argparse
 import time
+import base64
+import os
+
+DOWNLOADS_DIR = "downloads"
+os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
 def print_prompt():
     print("GS> ", end="", flush=True)
@@ -75,6 +80,19 @@ def receive_thread(client_socket):
                     elif mtype == "download_msg":
                         print(f"[Download] {msg.get('message')}")
                         
+                    elif mtype == "download_chunk":
+                        fname = msg.get("filename")
+                        offset = msg.get("offset")
+                        chunk_data = base64.b64decode(msg.get("data"))
+                        filepath = os.path.join(DOWNLOADS_DIR, fname)
+                        mode = 'r+b' if os.path.exists(filepath) and offset > 0 else 'wb'
+                        try:
+                            with open(filepath, mode) as f:
+                                f.seek(offset)
+                                f.write(chunk_data)
+                        except Exception as e:
+                            print(f"\033[91mCLI Save Error: {e}\033[0m")
+                            
                     elif mtype == "download_progress":
                         progress = msg.get("progress", 0)
                         speed = msg.get("speed", 0)

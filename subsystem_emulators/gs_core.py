@@ -8,6 +8,7 @@ import sys
 import json
 import socket
 import argparse
+import base64
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from Shared.Python.beacon_helper import *
@@ -345,6 +346,13 @@ def main():
                                                             with open(filepath, mode) as f:
                                                                 f.seek(offset)
                                                                 f.write(chunk)
+                                                                
+                                                            broadcast_to_cli({
+                                                                "type": "download_chunk",
+                                                                "filename": current_download_file,
+                                                                "offset": offset,
+                                                                "data": base64.b64encode(chunk).decode('utf-8')
+                                                            })
                                                                 
                                                             if dl_total_size > 0:
                                                                 progress = min(1.0, (offset + dl) / dl_total_size)
