@@ -172,9 +172,10 @@ const osEventFlagsAttr_t epsFlag_attributes = {
   .name = "epsFlag"
 };
 /* USER CODE BEGIN PV */
-
-
-
+osMutexId_t printfMutexHandle;
+const osMutexAttr_t printfMutex_attributes = {
+  .name = "printfMutex"
+};
 
 
 
@@ -352,6 +353,7 @@ int main(void)
   sensorsMutexHandle = osMutexNew(&sensorsMutex_attributes);
 
   /* USER CODE BEGIN RTOS_MUTEX */
+  printfMutexHandle = osMutexNew(&printfMutex_attributes);
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
@@ -1140,21 +1142,25 @@ uint16_t EPS_Perform_Transaction(uint8_t* cmd_buf, uint16_t cmd_len, uint8_t* ou
 }
 
 
-// int _write(int file, char *ptr, int len)
-//{
-//     // Transmit data over the USB CDC VCP
-//     CDC_Transmit_FS((uint8_t*) ptr, len);
-//     return len;
-// }
-
-PUTCHAR_PROTOTYPE
+int _write(int file, char *ptr, int len)
 {
-  /* Place your implementation of fputc here */
-  /* e.g. write a character to the USART1 and Loop until the end of transmission */
-  // HAL_UART_Transmit(&huart3, (uint8_t *)&ch, 1, 0xFFFF);
-  osMessageQueuePut(printQueueHandle,&ch,1,0xFFFF);
-
-  return ch;
+    /* If FreeRTOS is running and the mutex is initialized */
+    if (osKernelGetState() == osKernelRunning && printfMutexHandle != NULL) {
+        /* Check if we are inside an ISR */
+        if (__get_IPSR() != 0) {
+            /* Inside ISR: Skip mutex, just transmit */
+            HAL_UART_Transmit(&huart5, (uint8_t*)ptr, len, 10); 
+        } else {
+            /* Inside Thread: Acquire mutex to prevent mixed up prints */
+            osMutexAcquire(printfMutexHandle, osWaitForever);
+            HAL_UART_Transmit(&huart5, (uint8_t*)ptr, len, 1000);
+            osMutexRelease(printfMutexHandle);
+        }
+    } else {
+        /* Before FreeRTOS starts */
+        HAL_UART_Transmit(&huart5, (uint8_t*)ptr, len, 1000);
+    }
+    return len;
 }
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
