@@ -1091,7 +1091,7 @@ uint16_t EPS_Perform_Transaction(uint8_t* cmd_buf, uint16_t cmd_len, uint8_t* ou
     // 1. Clear Queue (Flush old/stale messages so we read the fresh response)
     osMessageQueueReset(epsUartQueueHandle);
 
-    uint8_t frameRx[128] = {0};
+    static uint8_t frameRx[128] = {0};
 
     HAL_StatusTypeDef hal_ret = HAL_UARTEx_ReceiveToIdle_IT(&EPS_UART,frameRx,128);
 
@@ -1451,6 +1451,9 @@ void mainTask(void *argument)
       if (ret != FR_OK){
         status = 1;
       }
+      if (downlink_file_data.chunk_len > 1008) {
+        downlink_file_data.chunk_len = 1008;
+      }
       ret = f_read(&file,buf_a,downlink_file_data.chunk_len,(UINT*)&actual_read_len);
       if (ret != FR_OK){
         status = 1;
@@ -1465,7 +1468,7 @@ void mainTask(void *argument)
       if (buf_len == 0){
         printf("downlink commu encode error\r\n");
       }
-      buf_len = KISS_Encode_Custom_Cmd(buf_a,KISS_CMD_DATA_FRAME,buf_len,buf_b);
+      buf_len = KISS_Encode_Custom_Cmd(buf_a, KISS_CMD_DATA_FRAME, buf_len, buf_b, sizeof(buf_b));
       if (buf_len == 0){
         printf("downlink kiss encode error\r\n");
       }
@@ -1526,7 +1529,7 @@ void mainTask(void *argument)
         uint8_t osi_buf_len = commu_encode(seq_num,payload_id,PID_OBC_GS_BEACON,beacon_content_len,beacon_content_buf,osi_buf,200);
         
         uint8_t beacon_kiss[200];
-        uint8_t beacon_kiss_len = KISS_Encode_Custom_Cmd(osi_buf,KISS_CMD_DATA_FRAME,osi_buf_len,beacon_kiss);
+        uint8_t beacon_kiss_len = KISS_Encode_Custom_Cmd(osi_buf, KISS_CMD_DATA_FRAME, osi_buf_len, beacon_kiss, sizeof(beacon_kiss));
         printf("Broadcast beacon");
         if (beacon_content_len < 121){
           printf(",No EPS Response still...");
@@ -1543,7 +1546,7 @@ void mainTask(void *argument)
       if (commu_data_ready){
         commu_data_ready = 0;
         printf("commu ready\r\n");
-        memcpy(temp_commu_data_buff,commu_data_buff,commu_size);
+        memcpy(temp_commu_data_buff,commu_global_buff,commu_size);
         uint16_t buff_size = commu_size;
         uint8_t dekissed_buff[256];
         kiss_status_t dekissed_len = KISS_Decode(temp_commu_data_buff,buff_size,dekissed_buff);
@@ -1559,7 +1562,7 @@ void mainTask(void *argument)
         //     continue; // Skip COMMU decode for ACK
         // }
         
-        commu_status_t status_commu =  commu_decode(dekissed_buff,dekissed_len,&commu_request_header,commu_payload);
+        commu_status_t status_commu =  commu_decode(dekissed_buff,dekissed_len,&commu_request_header,commu_payload, sizeof(commu_payload));
         // kiss_status_t status_kiss = KISS_UnwrapFrame(temp_commu_data_buff,buff_size,decode_buf,&output_frame);
         
 
@@ -1581,7 +1584,7 @@ void mainTask(void *argument)
               osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
               uint8_t file_req_data[] = {0x01, 0xFF, 0xFF}; /* File ID (1), Chunk ID (2)*/
               commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_COPY_IMAGE_TO_SD,3,file_req_data,commu_vr_request_payload,64);
-              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
+              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_REQUEST_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
               CDC_Transmit_FS(commu_content, commu_len);
               // osRet = osEventFlagsWait(payloadFlagHandle,PAYLOAD_FLAG_IDLE,osFlagsWaitAll | osFlagsNoClear,30000); /* Wait for VR to respond to image request (or at least ping) */ 
               osRet = osEventFlagsWait(payloadFlagHandle,PAYLOAD_FLAG_IMAGE_TRANSFER,osFlagsWaitAll | osFlagsNoClear,1000); /* Wait for VR to respond to image request (or at least ping) */ 
@@ -1593,7 +1596,7 @@ void mainTask(void *argument)
               }
               printf("ACK to GS with status %d\r\n", status);
               commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_VR_GS_RESPONSE_COPY_IMAGE_TO_SD,1,&status,commu_vr_request_payload,64);
-              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_DATA_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
               HAL_UART_Transmit_IT(&COM_UART,commu_content,commu_len);
               break;
             case PID_GS_VR_REQUEST_CAPTURE:
@@ -1601,11 +1604,11 @@ void mainTask(void *argument)
               osEventFlagsClear(payloadFlagHandle, PAYLOAD_FLAG_IDLE);
               osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_POLL_CAPTURE);
               commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_CAPTURE,0,NULL,commu_vr_request_payload,64);
-              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
+              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_REQUEST_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
               CDC_Transmit_FS(commu_content, commu_len);
               uint8_t tmp[2] = {0,0};
               commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_VR_GS_RESPONSE_CAPTURE,2,tmp,commu_vr_request_payload,128);
-              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_DATA_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
               HAL_UART_Transmit_IT(&COM_UART,commu_content,commu_len);
               break;
             case PID_GS_VR_REQUEST_PI_STATUS:
@@ -1613,7 +1616,7 @@ void mainTask(void *argument)
               commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_PING,0,NULL,commu_vr_request_payload,64);
               osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
               osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_REQUEST_STATUS);
-              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
+              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_REQUEST_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
               CDC_Transmit_FS(commu_content, commu_len);
               break;
             case PID_GS_VR_REQUEST_PING:
@@ -1622,7 +1625,7 @@ void mainTask(void *argument)
                 commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_PING,0,NULL,commu_vr_request_payload,64);
                 osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
                 osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_PING);
-                commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
+                commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_REQUEST_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
                 CDC_Transmit_FS(commu_content, commu_len);
                 uint32_t getFlagRet = osEventFlagsWait(payloadFlagHandle,PAYLOAD_FLAG_RESPONSE_PING,osFlagsWaitAll,1000);
                 if (getFlagRet == osErrorTimeout){
@@ -1639,7 +1642,7 @@ void mainTask(void *argument)
               else{
                 commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_GS_VR_NAK,0,NULL,commu_vr_request_payload,64);
               }
-              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+              commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_DATA_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
               osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
               HAL_UART_Transmit_IT(&COM_UART, commu_content, commu_len);
               break;
@@ -1648,7 +1651,7 @@ void mainTask(void *argument)
               
               /* 1. Fire shutdown KISS frame to Pi immediately via CDC */
               uint8_t pi_cmd[32] = {0};
-              uint16_t pi_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR, KISS_VR_PID_SHUTDOWN, NULL, 0, KISS_CMD_DATA, pi_cmd);
+              uint16_t pi_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR, KISS_VR_PID_SHUTDOWN, NULL, 0, KISS_CMD_DATA, pi_cmd, sizeof(pi_cmd));
               CDC_Transmit_FS(pi_cmd, pi_len);
               printf("Shutdown command fired to VR Pi (Fire & Forget)\r\n");
 
@@ -1657,7 +1660,7 @@ void mainTask(void *argument)
               // Note: We use COMMU_PAYLOAD_ID_VR (0x01) so GS knows it refers to the Pi
               uint16_t gs_ack_len = commu_encode(commu_request_header.seq_num, COMMU_PAYLOAD_ID_VR, PID_GS_VR_REQUEST_SHUTDOWN, 0, NULL, gs_ack_payload, 32);
               uint8_t gs_ack_kiss[64] = {0};
-              uint16_t gs_ack_kiss_len = KISS_Encode_Custom_Cmd(gs_ack_payload, KISS_CMD_DATA_FRAME, gs_ack_len, gs_ack_kiss);
+              uint16_t gs_ack_kiss_len = KISS_Encode_Custom_Cmd(gs_ack_payload, KISS_CMD_DATA_FRAME, gs_ack_len, gs_ack_kiss, sizeof(gs_ack_kiss));
               HAL_UART_Transmit_IT(&COM_UART, gs_ack_kiss, gs_ack_kiss_len);
               break;
             default:
@@ -1680,7 +1683,7 @@ void mainTask(void *argument)
                 uint8_t response_ping_len = commu_encode(0,COMMU_PAYLOAD_ID_OBC,PID_OBC_GS_RESPONSE_PING,0,NULL,response_ping_buf,10);
 
                 uint8_t kiss_encoded_res[32] = {0};
-                uint8_t kiss_respond_len = KISS_Encode_Custom_Cmd(response_ping_buf,KISS_CMD_DATA_FRAME,response_ping_len,kiss_encoded_res);
+                uint8_t kiss_respond_len = KISS_Encode_Custom_Cmd(response_ping_buf, KISS_CMD_DATA_FRAME, response_ping_len, kiss_encoded_res, sizeof(kiss_encoded_res));
 
                 HAL_StatusTypeDef ret = HAL_UART_Transmit_IT(&COM_UART,kiss_encoded_res,kiss_respond_len);
                 printf("Responsded ping from commu with return %d from UART\r\n",ret);
@@ -1727,7 +1730,7 @@ void mainTask(void *argument)
                 res = f_mount(NULL,"",0);
                 printf("\r\n");
                 uint8_t list_file_buf[256] = {0};
-                uint16_t list_file_encoded_len = commu_list_file_encode(files_name,file_count,list_file_buf);
+                uint16_t list_file_encoded_len = commu_list_file_encode(files_name,file_count,list_file_buf,sizeof(list_file_buf));
 
                 if (list_file_encoded_len == 0){
                   printf("Encode list file error\r\n");
@@ -1738,7 +1741,7 @@ void mainTask(void *argument)
                 uint16_t commu_list_file_encoded_len = commu_encode(0,COMMU_PAYLOAD_ID_OBC,PID_OBC_GS_RESPONSE_LIST_FILE,list_file_encoded_len,list_file_buf,commu_list_file_encoded,512); 
 
                 uint8_t kiss_list_file_encoded[256] = {0};
-                uint16_t kiss_list_file_encoded_len = KISS_Encode_Custom_Cmd(commu_list_file_encoded,KISS_CMD_DATA_FRAME,commu_list_file_encoded_len,kiss_list_file_encoded);
+                uint16_t kiss_list_file_encoded_len = KISS_Encode_Custom_Cmd(commu_list_file_encoded, KISS_CMD_DATA_FRAME, commu_list_file_encoded_len, kiss_list_file_encoded, sizeof(kiss_list_file_encoded));
 
                 ret = HAL_UART_Transmit_IT(&COM_UART,kiss_list_file_encoded,kiss_list_file_encoded_len);
                 printf("Responsded ping from commu with return %d from UART\r\n",ret);
@@ -1810,7 +1813,7 @@ void mainTask(void *argument)
                 if (buf_len_info == 0){
                   printf("commu encode error file info\r\n");
                 }
-                buf_len_info = KISS_Encode_Custom_Cmd(buf_b_info,KISS_CMD_DATA_FRAME,buf_len_info,buf_a_info);
+                buf_len_info = KISS_Encode_Custom_Cmd(buf_b_info, KISS_CMD_DATA_FRAME, buf_len_info, buf_a_info, sizeof(buf_a_info));
                 if (buf_len_info == 0){
                   printf("kiss encode error file info\r\n");
                 }
@@ -1840,9 +1843,9 @@ void mainTask(void *argument)
                 uint8_t status_response_data[32] = {0};
                 printf("GS Requests System status\r\n");
                 osEventFlagsClear(payloadFlagHandle,PAYLOAD_FLAG_IDLE);
-                commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+                commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_DATA_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
                 commu_vr_request_len = payload_encode(COMMU_PAYLOAD_ID_VR,PID_GS_VR_REQUEST_PI_STATUS,0,NULL,commu_vr_request_payload,64);
-                commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_REQUEST_FRAME,commu_vr_request_len,commu_content);
+                commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_REQUEST_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
                 CDC_Transmit_FS(commu_content, commu_len);
                 osEventFlagsSet(payloadFlagHandle,PAYLOAD_FLAG_REQUEST_STATUS);
                 uint32_t wait_status = osEventFlagsWait(payloadFlagHandle,PAYLOAD_FLAG_RESPONSE_STATUS,osFlagsWaitAll,1000);
@@ -1918,7 +1921,7 @@ void mainTask(void *argument)
                     uint8_t eps_status = 0;
                     commu_vr_request_len = commu_system_status_raw_downlink_encode(boot_count,usb_status,eps_status,status_response_data,20,commu_vr_request_payload);
                     commu_len = commu_encode(0,COMMU_PAYLOAD_ID_OBC,PID_GS_OBC_REQUEST_SYSTEM_STATUS,commu_vr_request_len,commu_vr_request_payload,status_response_data,256);
-                    commu_len = KISS_Encode_Custom_Cmd(status_response_data,KISS_CMD_DATA_FRAME,commu_len,commu_content);
+                    commu_len = KISS_Encode_Custom_Cmd(status_response_data, KISS_CMD_DATA_FRAME, commu_len, commu_content, sizeof(commu_content));
                   }
                 }
                 if (!(osEventFlagsGet(payloadFlagHandle) & (~PAYLOAD_FLAG_IDLE))){
@@ -1945,7 +1948,7 @@ void mainTask(void *argument)
         uint16_t commu_len = 0;
         printf("ACK to GS with status %d\r\n", status);
         commu_vr_request_len = commu_encode(0,COMMU_PAYLOAD_ID_VR,PID_VR_GS_RESPONSE_COPY_IMAGE_TO_SD,1,&status,commu_vr_request_payload,64);
-        commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload,KISS_CMD_DATA_FRAME,commu_vr_request_len,commu_content);
+        commu_len = KISS_Encode_Custom_Cmd(commu_vr_request_payload, KISS_CMD_DATA_FRAME, commu_vr_request_len, commu_content, sizeof(commu_content));
         HAL_UART_Transmit_IT(&COM_UART,commu_content,commu_len);
       }
       payload_flag_store = currentImgFlag;
@@ -2046,8 +2049,7 @@ void usbTask(void *argument)
             {
                 // printf("chunk: %d\r\n", current_chunk++);
                 uint8_t  reply_frame[32];
-                uint16_t reply_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR, KISS_PID_ACK,
-                                                    NULL, 0, 0x00, reply_frame);
+                uint16_t reply_len = KISS_WrapFrame(KISS_PAYLOAD_ID_VR, KISS_PID_ACK, NULL, 0, 0x00, reply_frame, sizeof(reply_frame));
                 CDC_Transmit_FS(reply_frame, reply_len);
                 // decoded_payload.file_id
                 fres = f_open(&fil,"0.jpg", FA_OPEN_APPEND | FA_WRITE);

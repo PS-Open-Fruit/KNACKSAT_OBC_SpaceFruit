@@ -520,3 +520,19 @@
 > [!NOTE]
 > This inspection was performed by static code review. **Dynamic testing** (fuzzing the KISS/COMMU parsers, stress-testing concurrent SD access, radiation-injection testing) is strongly recommended before flight.
 
+
+## Summary of Fixes (2026-10-07)
+
+The following CRITICAL issues have been fixed:
+- **C-01:** Fixed by adding `max_output_len` bounds check in `commu_decode` and updating `mainTask` to pass `sizeof(commu_payload)`.
+- **C-02:** Fixed by adding `max_output_len` bounds check in `payload_decode`.
+- **C-03:** Fixed operator precedence bug in CRC parsing for both `payload_protocol.c` and `commu_helper.h` by wrapping the last bitwise operation in parentheses.
+- **C-04:** Fixed `commu_global_buff` overflow by changing its size from `COMMU_RX_SIZE` to `COMMU_BUF_SIZE`.
+- **C-05:** Fixed data race by having `mainTask` read from the static snapshot `commu_global_buff` instead of the active `commu_data_buff`.
+- **C-06:** Fixed use-after-return by making `frameRx` buffer `static` inside `EPS_Perform_Transaction`.
+- **C-07:** Added `max_out_len` to all KISS encode functions (`KISS_Encode_Custom_Cmd`, `KISS_Encode`, `KISS_SLIP_ENCODE`, `KISS_WrapFrame`, `KISS_WrapImageChunk`) and updated all caller functions to pass `sizeof(buffer)` to enforce output bounds checking.
+- **C-08:** Fixed unbounded write in `commu_list_file_encode` by introducing a `max_output_len` parameter and breaking out of the loop if `output_len` exceeds it, along with updating `actual_count`.
+- **C-09:** Fixed unbounded `chunk_len` in file downlink by clamping `downlink_file_data.chunk_len` to 1008 before calling `f_read`.
+
+**What's Missing:**
+- All HIGH, MEDIUM, and LOW findings remain unresolved as per the instructions to only fix CRITICAL findings. This includes FatFS mount/unmount races (H-01), SPI DMA semaphore timeout logic (H-02, H-03), LittleFS truncation (H-07), and other non-critical issues detailed in the roadmap.

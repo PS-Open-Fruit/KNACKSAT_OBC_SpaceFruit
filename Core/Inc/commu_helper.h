@@ -86,7 +86,7 @@ typedef struct{
 static uint8_t commu_temp_buff[COMMU_RX_SIZE];   // DMA landing buffer (single chunk)
 static uint8_t commu_data_buff[COMMU_BUF_SIZE];  // accumulation buffer
 static uint16_t commu_offset = 0;                // how many bytes accumulated so far
-static uint8_t commu_global_buff[COMMU_RX_SIZE];   // DMA landing buffer (single chunk)
+static uint8_t commu_global_buff[COMMU_BUF_SIZE];   // snapshot buffer
 uint16_t commu_size = 0;
 uint8_t commu_data_ready = 0;
 
@@ -136,7 +136,7 @@ uint16_t commu_encode(uint8_t seq_num, uint8_t payload_id, uint8_t pid,
     return index;
 }
 
-commu_status_t commu_decode(const uint8_t *input_buf, uint16_t input_len,commu_header_t *header,uint8_t *output_payload){
+commu_status_t commu_decode(const uint8_t *input_buf, uint16_t input_len,commu_header_t *header,uint8_t *output_payload, uint16_t max_output_len){
     /* seq (1) + payload_id (1) + pid (1) + dataLen (2) + crc (4)*/
     if (input_len < BASIC_COMMU_FRAME_LEN){
       return COMMU_ERR_FRAMING;
@@ -145,7 +145,7 @@ commu_status_t commu_decode(const uint8_t *input_buf, uint16_t input_len,commu_h
     uint32_t crc_in = (((uint32_t)input_buf[input_len - 4] & 0xFF) << 24) |
                       (((uint32_t)input_buf[input_len - 3] & 0xFF) << 16) |
                       (((uint32_t)input_buf[input_len - 2] & 0xFF) << 8)  |
-                        (uint32_t)input_buf[input_len - 1] & 0xFF;
+                      ((uint32_t)input_buf[input_len - 1] & 0xFF);
 
     if (crc != crc_in){
       return COMMU_ERR_CRC;
@@ -154,9 +154,16 @@ commu_status_t commu_decode(const uint8_t *input_buf, uint16_t input_len,commu_h
     header->payload_id = input_buf[1];
     header->pid = input_buf[2];
     header->data_len = (input_buf[3] << 8) | (input_buf[4]);
-    if (output_payload != NULL && header->data_len >= 0){
+    
+    uint16_t available = input_len - BASIC_COMMU_FRAME_LEN;
+    if (header->data_len > available) {
+        return COMMU_ERR_FRAMING;
+    }
+    if (output_payload != NULL && header->data_len <= max_output_len){
       /* -4 for crc -5 for headers*/
       memcpy(output_payload,&input_buf[5],header->data_len);
+    } else if (header->data_len > max_output_len) {
+        return COMMU_ERR_FRAMING;
     }
     return COMMU_VALID_DATA;
 }
@@ -211,7 +218,7 @@ commu_status_t decode_file_data_request(const uint8_t *input_data,uint8_t input_
   return COMMU_VALID_DATA;
 }
 
-uint16_t commu_list_file_encode(char files[20][256],uint8_t files_count,uint8_t *output_buffer){
+uint16_t commu_list_file_encode(char files[20][256],uint8_t files_count,uint8_t *output_buffer, uint16_t max_output_len){
   uint16_t output_len = 0;
   printf("file count %d\r\n",files_count);
   if (files_count <= 0){
@@ -222,13 +229,17 @@ uint16_t commu_list_file_encode(char files[20][256],uint8_t files_count,uint8_t 
   }
   output_buffer[output_len] = files_count;
   output_len++;
+  uint8_t actual_count = 0;
   for (int i = 0;i<files_count;i++){
     uint16_t file_len = strlen(files[i]);
+    if (output_len + 1 + file_len > max_output_len) break;
     output_buffer[output_len] = file_len;
     output_len++;
-    strncpy(&output_buffer[output_len],files[i],file_len);
+    strncpy((char*)&output_buffer[output_len],files[i],file_len);
     output_len += file_len;
+    actual_count++;
   }
+  output_buffer[0] = actual_count;
   return output_len;
 }
 
