@@ -57,6 +57,7 @@ dkms.conf
 .settings/
 .venv
 venv
+.env
 
 
 # STM32CubeIDE/Eclipse generated files and directories
