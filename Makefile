@@ -37,6 +37,13 @@ BUILD_DIR = build
 # C sources
 C_SOURCES =  \
 Core/Src/main.c \
+Core/Src/commu_helper.c \
+Core/Src/tasks/task_main.c \
+Core/Src/tasks/task_sensors.c \
+Core/Src/tasks/task_comms.c \
+Core/Src/tasks/task_usb.c \
+Core/Src/tasks/task_log.c \
+Core/Src/tasks/task_wdtfeed.c \
 Core/Src/stm32l4xx_it.c \
 Core/Src/stm32l4xx_hal_msp.c \
 USB_DEVICE/App/usb_device.c \
